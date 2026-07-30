@@ -1,4 +1,5 @@
 import type { ApiCatalogue } from "./openapi";
+import { siteConfig } from "../config/site";
 
 export type StoredWorkspace = {
   source: string;
@@ -13,7 +14,7 @@ export function encodeStoredWorkspace(workspace: StoredWorkspace): string {
 
 export function decodeStoredWorkspace(
   value: string,
-  fallbackName = "deel-arazzo.yml",
+  fallbackName = siteConfig.defaultDocumentName,
 ): StoredWorkspace {
   try {
     const candidate = JSON.parse(value) as Partial<StoredWorkspace>;

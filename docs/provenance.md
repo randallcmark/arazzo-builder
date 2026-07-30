@@ -15,6 +15,11 @@ surfaces; and chunky abstract forms. No Deel logo, Bagoss font, illustration,
 product screenshot, or other Deel-owned asset is included. Arazzo Loom retains
 its own name, weave mark, layouts, components, and generated social artwork.
 
+The bundled `deel-arazzo.yml` and compact `deel-openapi.json` are
+repository-authored demonstration fixtures rather than downloaded copies of a
+Deel specification. They should be replaced only with files whose use and
+redistribution terms have been reviewed independently.
+
 ## Sources used to implement behavior
 
 - The published OpenAPI Arazzo Specification

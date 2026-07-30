@@ -4,29 +4,42 @@ import {
   Background,
   Controls,
   Handle,
+  MarkerType,
   MiniMap,
   Position,
   ReactFlow,
+  useNodesState,
   type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Braces, Check, Workflow } from "lucide-react";
+import { Braces, Check, Move, Workflow } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import type { ArazzoStep, ArazzoWorkflow } from "@/lib/arazzo";
 import { shortOperation } from "@/lib/arazzo";
+import { workflowEdges, type WorkflowEdge } from "@/lib/workflow-graph";
+import {
+  defaultWorkflowLayout,
+  embeddedWorkflowLayout,
+  readStoredWorkflowLayout,
+  writeStoredWorkflowLayout,
+  type WorkflowNodeLayout,
+} from "@/lib/workflow-layout";
 
 type FlowNodeData = {
   kind: "input" | "step" | "output";
+  direction: "horizontal" | "vertical";
   title: string;
   subtitle: string;
   step?: ArazzoStep;
 };
 
 function LoomNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
+  const vertical = data.direction === "vertical";
   return (
     <div className={`loom-node loom-node--${data.kind} ${selected ? "is-selected" : ""}`}>
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={vertical ? Position.Top : Position.Left} />
       <div className="loom-node-icon">
         {data.kind === "input" ? (
           <Braces size={16} />
@@ -40,7 +53,7 @@ function LoomNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
         <small>{data.subtitle}</small>
         <strong>{data.title}</strong>
       </div>
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={vertical ? Position.Bottom : Position.Right} />
     </div>
   );
 }
@@ -50,19 +63,136 @@ const nodeTypes = { loom: LoomNode };
 export function FlowView({
   workflow,
   selectedStepId,
+  selectedEdgeId,
   onStepSelect,
+  onEdgeSelect,
+  mode = "flow",
+  layoutScope,
+  onLayoutChange,
 }: {
   workflow: ArazzoWorkflow;
   selectedStepId: string | null;
+  selectedEdgeId: string | null;
   onStepSelect: (stepId: string | null) => void;
+  onEdgeSelect: (edgeId: string | null) => void;
+  mode?: "flow" | "chart";
+  layoutScope: string;
+  onLayoutChange?: (layout: WorkflowNodeLayout) => void;
 }) {
-  const nodes: Array<Node<FlowNodeData>> = [
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>([]);
+  const graphEdges = useMemo(() => workflowEdges(workflow), [workflow]);
+
+  useEffect(() => {
+    const savedLayout =
+      mode === "flow"
+        ? readStoredWorkflowLayout(layoutScope, workflow.workflowId) ??
+          embeddedWorkflowLayout(workflow) ??
+          defaultWorkflowLayout(workflow)
+        : {};
+    setNodes(
+      workflowNodes(
+        workflow,
+        mode,
+        savedLayout,
+        selectedStepId,
+      ),
+    );
+  }, [layoutScope, mode, selectedStepId, setNodes, workflow]);
+
+  const edges = useMemo(
+    () =>
+      graphEdges.map((edge) =>
+        flowEdge(edge, selectedEdgeId === edge.id),
+      ),
+    [graphEdges, selectedEdgeId],
+  );
+
+  return (
+    <div className={`workflow-graph workflow-graph--${mode}`}>
+      {mode === "flow" && (
+        <div className="flow-canvas-note">
+          <Move size={14} />
+          <span>Drag cards to arrange this view. Execution is unchanged.</span>
+        </div>
+      )}
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        nodesDraggable={mode === "flow"}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.35}
+        maxZoom={1.6}
+        onPaneClick={() => {
+          onStepSelect(null);
+          onEdgeSelect(null);
+        }}
+        onNodeClick={(_, node) => {
+          if (node.data.kind === "step") {
+            onStepSelect(node.id);
+            onEdgeSelect(null);
+          }
+        }}
+        onEdgeClick={(_, edge) => {
+          if (edge.data?.kind !== "system") {
+            onEdgeSelect(edge.id);
+            onStepSelect(null);
+          }
+        }}
+        onNodeDragStop={(_, node) => {
+          if (mode !== "flow") return;
+          const current =
+            readStoredWorkflowLayout(layoutScope, workflow.workflowId) ??
+            embeddedWorkflowLayout(workflow) ??
+            defaultWorkflowLayout(workflow);
+          const nextLayout = {
+            ...current,
+            [node.id]: node.position,
+          };
+          writeStoredWorkflowLayout(
+            layoutScope,
+            workflow.workflowId,
+            nextLayout,
+          );
+          onLayoutChange?.(nextLayout);
+        }}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background color="#cbc7ed" gap={24} size={1} />
+        <MiniMap
+          nodeColor={(node) =>
+            node.data?.kind === "step" ? "#ffd447" : "#beb8f8"
+          }
+          maskColor="rgba(246, 245, 255, 0.78)"
+        />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  );
+}
+
+function workflowNodes(
+  workflow: ArazzoWorkflow,
+  mode: "flow" | "chart",
+  layout: WorkflowNodeLayout,
+  selectedStepId: string | null,
+): Array<Node<FlowNodeData>> {
+  const direction: FlowNodeData["direction"] =
+    mode === "chart" ? "vertical" : "horizontal";
+  const chartX = 310;
+  return [
     {
       id: "input",
       type: "loom",
-      position: { x: 40, y: 160 },
+      position:
+        mode === "chart"
+          ? { x: chartX, y: 30 }
+          : layout.input ?? { x: 40, y: 165 },
       data: {
         kind: "input",
+        direction,
         title: inputLabel(workflow),
         subtitle: "Workflow input",
       },
@@ -71,16 +201,18 @@ export function FlowView({
     ...workflow.steps.map((step, index) => ({
       id: step.stepId,
       type: "loom",
-      position: {
-        x: 310 + index * 280,
-        y: 110 + (index % 2) * 100,
-      },
+      position:
+        layout[step.stepId] ??
+        (mode === "chart"
+          ? { x: chartX, y: 165 + index * 145 }
+          : { x: 310 + index * 280, y: 110 + (index % 2) * 100 }),
       data: {
         kind: "step" as const,
+        direction,
         title: step.stepId,
-        subtitle: shortOperation(
+        subtitle: `${String(index + 1).padStart(2, "0")} · ${shortOperation(
           step.operationId ?? step.operationPath ?? step.workflowId ?? "Operation",
-        ),
+        )}`,
         step,
       },
       selected: selectedStepId === step.stepId,
@@ -88,86 +220,62 @@ export function FlowView({
     {
       id: "output",
       type: "loom",
-      position: { x: 310 + workflow.steps.length * 280, y: 160 },
+      position:
+        mode === "chart"
+          ? { x: chartX, y: 165 + workflow.steps.length * 145 }
+          : layout.output ?? {
+              x: 310 + workflow.steps.length * 280,
+              y: 165,
+            },
       data: {
         kind: "output",
+        direction,
         title: outputLabel(workflow),
         subtitle: "Workflow output",
       },
       selectable: false,
     },
   ];
+}
 
-  const edges: Edge[] = [];
-  if (workflow.steps.length) {
-    edges.push({
-      id: "input-first",
-      source: "input",
-      target: workflow.steps[0].stepId,
-      animated: true,
-      style: { stroke: "#8d84dc", strokeWidth: 2 },
-    });
-  }
-
-  workflow.steps.forEach((step, index) => {
-    const next = workflow.steps[index + 1];
-    const hasGoto = step.onSuccess?.some((action) => action.type === "goto");
-    if (next && !hasGoto) {
-      edges.push({
-        id: `${step.stepId}-${next.stepId}`,
-        source: step.stepId,
-        target: next.stepId,
-        style: { stroke: "#8d84dc", strokeWidth: 2 },
-      });
-    }
-    for (const action of step.onSuccess ?? []) {
-      if (action.type === "goto" && action.stepId) {
-        edges.push({
-          id: `${step.stepId}-${action.stepId}-success`,
-          source: step.stepId,
-          target: action.stepId,
-          label: action.name ?? "success",
-          style: { stroke: "#5b68f6", strokeWidth: 2 },
-        });
-      }
-    }
-  });
-
-  const last = workflow.steps.at(-1);
-  if (last) {
-    edges.push({
-      id: "last-output",
-      source: last.stepId,
-      target: "output",
-      style: { stroke: "#8d84dc", strokeWidth: 2 },
-    });
-  }
-
-  return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      fitView
-      fitViewOptions={{ padding: 0.2 }}
-      minZoom={0.35}
-      maxZoom={1.6}
-      onPaneClick={() => onStepSelect(null)}
-      onNodeClick={(_, node) => {
-        if (node.data.kind === "step") onStepSelect(node.id);
-      }}
-      proOptions={{ hideAttribution: true }}
-    >
-      <Background color="#cbc7ed" gap={24} size={1} />
-      <MiniMap
-        nodeColor={(node) =>
-          node.data?.kind === "step" ? "#ffd447" : "#beb8f8"
-        }
-        maskColor="rgba(247, 244, 236, 0.78)"
-      />
-      <Controls showInteractive={false} />
-    </ReactFlow>
-  );
+function flowEdge(edge: WorkflowEdge, selected: boolean): Edge {
+  const colors = {
+    system: "#a9a4cf",
+    implicit: "#8d84dc",
+    success: "#5b68f6",
+    failure: "#c4486b",
+    retry: "#d9a900",
+    end: "#7454e8",
+  };
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    label: edge.kind === "system" ? undefined : edge.label,
+    data: edge,
+    selected,
+    type: edge.kind === "retry" ? "default" : "smoothstep",
+    animated: edge.kind === "implicit",
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      color: colors[edge.kind],
+    },
+    style: {
+      stroke: colors[edge.kind],
+      strokeWidth: selected ? 3.5 : 2,
+    },
+    labelStyle: {
+      fill: colors[edge.kind],
+      fontSize: 9,
+      fontWeight: 700,
+    },
+    labelBgStyle: {
+      fill: "#ffffff",
+      fillOpacity: 0.94,
+    },
+    labelBgPadding: [6, 4],
+    labelBgBorderRadius: 8,
+  };
 }
 
 function inputLabel(workflow: ArazzoWorkflow): string {

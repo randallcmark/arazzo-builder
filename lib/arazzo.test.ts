@@ -2,9 +2,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  findWorkflowStepAtOffset,
+  findWorkflowStepRange,
   insertWorkflow,
+  materializeImplicitConnection,
   parseArazzo,
+  reorderWorkflowStep,
+  setWorkflowLayoutExtension,
   upsertSourceDescription,
+  updateWorkflowAction,
   workflowToFlowchart,
   workflowToSequence,
   type ArazzoWorkflow,
@@ -118,5 +124,115 @@ describe("Arazzo document services", () => {
         url: "https://example.com/openapi.json",
       },
     ]);
+  });
+
+  it("reorders workflow steps while retaining their content", () => {
+    const next = reorderWorkflowStep(
+      starter,
+      "find-worker-contracts",
+      "load-contracts",
+      -1,
+    );
+    const workflow = parseArazzo(next).spec!.workflows[0];
+
+    expect(workflow.steps.map((step) => step.stepId)).toEqual([
+      "load-contracts",
+      "find-worker",
+    ]);
+    expect(workflow.steps[0].outputs).toEqual({
+      contracts: "$response.body#/data",
+    });
+  });
+
+  it("turns an implicit link into an editable success action", () => {
+    const explicit = materializeImplicitConnection(
+      starter,
+      "find-worker-contracts",
+      "find-worker",
+      "load-contracts",
+    );
+    const edited = updateWorkflowAction(
+      explicit,
+      "find-worker-contracts",
+      "find-worker",
+      "onSuccess",
+      0,
+      {
+        name: "Worker found",
+        condition: "$statusCode == 200",
+      },
+    );
+    const action = parseArazzo(edited).spec!.workflows[0].steps[0].onSuccess?.[0];
+
+    expect(action).toEqual({
+      name: "Worker found",
+      type: "goto",
+      stepId: "load-contracts",
+      criteria: [{ condition: "$statusCode == 200" }],
+    });
+  });
+
+  it("preserves YAML comments while serializing graph changes", () => {
+    const commented = starter.replace(
+      "    steps:\n",
+      "    # The execution order is intentional.\n    steps:\n",
+    );
+    const next = reorderWorkflowStep(
+      commented,
+      "find-worker-contracts",
+      "load-contracts",
+      -1,
+    );
+
+    expect(next).toContain("# The execution order is intentional.");
+  });
+
+  it("adds and removes a portable workflow layout extension", () => {
+    const embedded = setWorkflowLayoutExtension(
+      starter,
+      "find-worker-contracts",
+      {
+        version: 1,
+        nodes: {
+          input: { x: 40, y: 165 },
+          "find-worker": { x: 310, y: 110 },
+        },
+      },
+    );
+    expect(
+      parseArazzo(embedded).spec!.workflows[0]["x-loom-layout"],
+    ).toEqual({
+      version: 1,
+      nodes: {
+        input: { x: 40, y: 165 },
+        "find-worker": { x: 310, y: 110 },
+      },
+    });
+
+    const removed = setWorkflowLayoutExtension(
+      embedded,
+      "find-worker-contracts",
+      null,
+    );
+    expect(
+      parseArazzo(removed).spec!.workflows[0]["x-loom-layout"],
+    ).toBeUndefined();
+  });
+
+  it("maps YAML offsets to workflow steps in both directions", () => {
+    const range = findWorkflowStepRange(
+      starter,
+      "find-worker-contracts",
+      "load-contracts",
+    );
+
+    expect(range).not.toBeNull();
+    expect(starter.slice(range!.start, range!.end)).toContain(
+      "stepId: load-contracts",
+    );
+    expect(findWorkflowStepAtOffset(starter, range!.start + 10)).toEqual({
+      workflowId: "find-worker-contracts",
+      stepId: "load-contracts",
+    });
   });
 });

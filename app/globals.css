@@ -887,6 +887,28 @@ a {
   color: var(--cream);
 }
 
+.workspace-toolbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.workspace-toolbar-actions .icon-button {
+  height: 30px;
+  width: 30px;
+}
+
+.layout-extension-button {
+  font-size: 8px;
+  padding: 7px 9px;
+}
+
+.layout-extension-button.is-active {
+  background: var(--mint);
+  border-color: var(--mint-2);
+  color: var(--forest);
+}
+
 .active-workflow-label {
   align-items: center;
   color: var(--ink-soft);
@@ -912,6 +934,10 @@ a {
   overflow: hidden;
 }
 
+.workspace-canvas--flowchart {
+  overflow: hidden;
+}
+
 .workspace-canvas--flowchart,
 .workspace-canvas--sequence {
   background:
@@ -919,6 +945,11 @@ a {
     linear-gradient(90deg, rgba(24, 52, 45, 0.035) 1px, transparent 1px),
     #f8f6ef;
   background-size: 28px 28px;
+}
+
+.monaco-editor .yaml-step-highlight {
+  background: rgba(91, 104, 246, 0.1);
+  border-left: 3px solid #5b68f6;
 }
 
 .workspace-empty {
@@ -985,6 +1016,33 @@ a {
   width: 210px;
 }
 
+.workflow-graph {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.flow-canvas-note {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(67, 54, 154, 0.09);
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 9px;
+  gap: 7px;
+  left: 14px;
+  padding: 8px 12px;
+  position: absolute;
+  top: 14px;
+  z-index: 5;
+}
+
+.flow-canvas-note svg {
+  color: var(--forest);
+}
+
 .loom-node--step {
   border-left: 4px solid var(--orange);
 }
@@ -1049,18 +1107,101 @@ a {
   border: 1px solid var(--line);
 }
 
-.mermaid-view {
-  align-items: center;
-  display: flex;
-  min-height: 100%;
-  justify-content: center;
-  padding: 44px;
+.react-flow__edge {
+  cursor: pointer;
 }
 
-.mermaid-view svg {
-  height: auto;
-  max-height: calc(100vh - 210px);
-  max-width: 100%;
+.react-flow__edge.selected .react-flow__edge-path {
+  filter: drop-shadow(0 2px 3px rgba(91, 104, 246, 0.2));
+}
+
+.mermaid-view {
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.mermaid-viewport {
+  align-items: center;
+  cursor: grab;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  width: 100%;
+}
+
+.mermaid-viewport:active {
+  cursor: grabbing;
+}
+
+.mermaid-diagram-surface {
+  flex: 0 0 auto;
+  transform-origin: center center;
+  transition: transform 80ms ease-out;
+}
+
+.mermaid-diagram-surface svg {
+  display: block;
+}
+
+.diagram-toolbar {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  box-shadow: 0 8px 22px rgba(67, 54, 154, 0.09);
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  z-index: 4;
+}
+
+.diagram-toolbar > span {
+  color: var(--ink-soft);
+  font-family: var(--font-mono), monospace;
+  font-size: 8px;
+  min-width: 38px;
+  text-align: center;
+}
+
+.diagram-toolbar .icon-button {
+  height: 29px;
+  width: 29px;
+}
+
+.diagram-interaction-hint {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono), monospace;
+  font-size: 8px;
+  left: 14px;
+  padding: 8px 11px;
+  position: absolute;
+  top: 14px;
+  z-index: 4;
+}
+
+.mermaid-view--interactive .messageText[data-step-id] {
+  cursor: pointer;
+  outline: none;
+  transition: fill 150ms ease;
+}
+
+.mermaid-view--interactive .messageText[data-step-id]:hover,
+.mermaid-view--interactive .messageText[data-step-id]:focus,
+.mermaid-view--interactive .messageText.is-selected-message {
+  fill: var(--forest) !important;
+  font-weight: 750 !important;
+  text-decoration: underline;
 }
 
 .diagram-error {
@@ -1141,6 +1282,55 @@ a {
   margin-top: 5px;
   overflow-wrap: anywhere;
   padding: 8px;
+}
+
+.connection-kind {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 750;
+  gap: 6px;
+  padding: 7px 9px;
+  text-transform: capitalize;
+}
+
+.connection-kind--implicit {
+  background: var(--mint);
+  color: var(--forest-2);
+}
+
+.connection-kind--success {
+  background: #e2e6ff;
+  color: var(--forest);
+}
+
+.connection-kind--failure {
+  background: #ffe8ef;
+  color: var(--red);
+}
+
+.connection-kind--retry {
+  background: var(--orange-soft);
+  color: #8a6b00;
+}
+
+.connection-kind--end {
+  background: var(--mint);
+  color: var(--forest-2);
+}
+
+.connection-route {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr auto 1fr;
+  margin-top: 10px;
+}
+
+.connection-route span {
+  color: var(--ink-soft);
+  font-size: 8px;
 }
 
 .docs-view {

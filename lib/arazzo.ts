@@ -19,6 +19,8 @@ export type ArazzoAction = {
   stepId?: string;
   workflowId?: string;
   criteria?: Array<{ condition?: string }>;
+  retryAfter?: number;
+  retryLimit?: number;
 };
 
 export type ArazzoStep = {
@@ -35,6 +37,16 @@ export type ArazzoStep = {
   onFailure?: ArazzoAction[];
 };
 
+export type ArazzoCanvasPosition = {
+  x: number;
+  y: number;
+};
+
+export type ArazzoWorkflowLayout = {
+  version: 1;
+  nodes: Record<string, ArazzoCanvasPosition>;
+};
+
 export type ArazzoWorkflow = {
   workflowId: string;
   summary?: string;
@@ -46,6 +58,7 @@ export type ArazzoWorkflow = {
   };
   steps: ArazzoStep[];
   outputs?: Record<string, string>;
+  "x-loom-layout"?: ArazzoWorkflowLayout;
 };
 
 export type ArazzoSpec = {
@@ -274,6 +287,229 @@ export function upsertSourceDescription(
   }
 
   return document.toString({ lineWidth: 0 });
+}
+
+export function reorderWorkflowStep(
+  source: string,
+  workflowId: string,
+  stepId: string,
+  direction: -1 | 1,
+): string {
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    keepSourceTokens: true,
+  });
+  if (document.errors.length) {
+    throw new Error("Fix YAML syntax errors before reordering steps.");
+  }
+
+  const steps = workflowStepsNode(document, workflowId);
+  const currentIndex = steps.items.findIndex(
+    (item) => isMap(item) && item.get("stepId") === stepId,
+  );
+  const targetIndex = currentIndex + direction;
+  if (
+    currentIndex < 0 ||
+    targetIndex < 0 ||
+    targetIndex >= steps.items.length
+  ) {
+    return source;
+  }
+
+  const [step] = steps.items.splice(currentIndex, 1);
+  steps.items.splice(targetIndex, 0, step);
+  return document.toString({ lineWidth: 0 });
+}
+
+export function materializeImplicitConnection(
+  source: string,
+  workflowId: string,
+  sourceStepId: string,
+  targetStepId: string,
+): string {
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    keepSourceTokens: true,
+  });
+  if (document.errors.length) {
+    throw new Error("Fix YAML syntax errors before editing connections.");
+  }
+
+  const step = workflowStepNode(document, workflowId, sourceStepId);
+  step.set(
+    "onSuccess",
+    document.createNode([
+      {
+        name: `Continue to ${targetStepId}`,
+        type: "goto",
+        stepId: targetStepId,
+      },
+    ]),
+  );
+  return document.toString({ lineWidth: 0 });
+}
+
+export function updateWorkflowAction(
+  source: string,
+  workflowId: string,
+  stepId: string,
+  channel: "onSuccess" | "onFailure",
+  actionIndex: number,
+  patch: { name?: string; condition?: string },
+): string {
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    keepSourceTokens: true,
+  });
+  if (document.errors.length) {
+    throw new Error("Fix YAML syntax errors before editing connections.");
+  }
+
+  const step = workflowStepNode(document, workflowId, stepId);
+  const actions = step.get(channel, true);
+  if (!isSeq(actions)) throw new Error(`The step has no ${channel} actions.`);
+  const action = actions.items[actionIndex];
+  if (!isMap(action)) throw new Error("The selected action could not be edited.");
+
+  if (patch.name !== undefined) action.set("name", patch.name);
+  if (patch.condition !== undefined) {
+    const criteria = action.get("criteria", true);
+    if (patch.condition.trim()) {
+      if (isSeq(criteria) && criteria.items.length) {
+        const firstCriterion = criteria.items[0];
+        if (isMap(firstCriterion)) {
+          firstCriterion.set("condition", patch.condition.trim());
+        } else {
+          criteria.items[0] = document.createNode({
+            condition: patch.condition.trim(),
+          });
+        }
+      } else {
+        action.set(
+          "criteria",
+          document.createNode([{ condition: patch.condition.trim() }]),
+        );
+      }
+    } else {
+      if (isSeq(criteria) && criteria.items.length > 1) {
+        criteria.items.splice(0, 1);
+      } else {
+        action.delete("criteria");
+      }
+    }
+  }
+  return document.toString({ lineWidth: 0 });
+}
+
+export function setWorkflowLayoutExtension(
+  source: string,
+  workflowId: string,
+  layout: ArazzoWorkflowLayout | null,
+): string {
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    keepSourceTokens: true,
+  });
+  if (document.errors.length) {
+    throw new Error("Fix YAML syntax errors before updating the embedded layout.");
+  }
+
+  const workflow = workflowNode(document, workflowId);
+  if (layout) {
+    workflow.set("x-loom-layout", document.createNode(layout));
+  } else {
+    workflow.delete("x-loom-layout");
+  }
+  return document.toString({ lineWidth: 0 });
+}
+
+export function findWorkflowStepRange(
+  source: string,
+  workflowId: string,
+  stepId: string,
+): { start: number; end: number } | null {
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    keepSourceTokens: true,
+  });
+  if (document.errors.length) return null;
+
+  try {
+    const step = workflowStepNode(document, workflowId, stepId);
+    return step.range
+      ? { start: step.range[0], end: step.range[1] }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function findWorkflowStepAtOffset(
+  source: string,
+  offset: number,
+): { workflowId: string; stepId: string } | null {
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    keepSourceTokens: true,
+  });
+  if (document.errors.length) return null;
+
+  const workflows = document.get("workflows", true);
+  if (!isSeq(workflows)) return null;
+  for (const workflow of workflows.items) {
+    if (!isMap(workflow)) continue;
+    const workflowId = workflow.get("workflowId");
+    const steps = workflow.get("steps", true);
+    if (typeof workflowId !== "string" || !isSeq(steps)) continue;
+    for (const step of steps.items) {
+      if (!isMap(step) || !step.range) continue;
+      const stepId = step.get("stepId");
+      if (
+        typeof stepId === "string" &&
+        offset >= step.range[0] &&
+        offset <= step.range[1]
+      ) {
+        return { workflowId, stepId };
+      }
+    }
+  }
+  return null;
+}
+
+function workflowStepsNode(
+  document: Document.Parsed,
+  workflowId: string,
+) {
+  const workflow = workflowNode(document, workflowId);
+  const steps = workflow.get("steps", true);
+  if (!isSeq(steps)) throw new Error(`Workflow "${workflowId}" has no steps.`);
+  return steps;
+}
+
+function workflowNode(
+  document: Document.Parsed,
+  workflowId: string,
+) {
+  const workflows = document.get("workflows", true);
+  if (!isSeq(workflows)) throw new Error("The document has no workflows sequence.");
+  const workflow = workflows.items.find(
+    (item) => isMap(item) && item.get("workflowId") === workflowId,
+  );
+  if (!isMap(workflow)) throw new Error(`Workflow "${workflowId}" was not found.`);
+  return workflow;
+}
+
+function workflowStepNode(
+  document: Document.Parsed,
+  workflowId: string,
+  stepId: string,
+) {
+  const steps = workflowStepsNode(document, workflowId);
+  const step = steps.items.find(
+    (item) => isMap(item) && item.get("stepId") === stepId,
+  );
+  if (!isMap(step)) throw new Error(`Step "${stepId}" was not found.`);
+  return step;
 }
 
 export function workflowToFlowchart(

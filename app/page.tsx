@@ -7,6 +7,7 @@ import {
   Route,
   Sparkles,
 } from "lucide-react";
+import { siteConfig } from "@/config/site";
 
 const views = [
   {
@@ -39,7 +40,7 @@ export default function Home() {
             <span />
             <span />
           </span>
-          <span>Arazzo Loom</span>
+          <span>{siteConfig.productName}</span>
         </Link>
         <Link className="nav-cta" href="/workspace">
           Open workspace
@@ -88,7 +89,7 @@ export default function Home() {
           <div className="visual-header">
             <span className="visual-file">
               <FileCode2 size={15} />
-              deel-arazzo.yml
+              {siteConfig.defaultDocumentName}
             </span>
             <span className="visual-status">Published baseline</span>
           </div>
@@ -142,7 +143,7 @@ export default function Home() {
           </h2>
         </div>
         <p>
-          Arazzo Loom keeps the document at the centre. Every diagram, detail
+          {siteConfig.productName} keeps the document at the centre. Every diagram, detail
           panel, and builder action is another view of the same portable file.
         </p>
       </section>
@@ -166,7 +167,7 @@ export default function Home() {
             <span />
             <span />
           </span>
-          <span>Arazzo Loom</span>
+          <span>{siteConfig.productName}</span>
         </div>
         <p>Built for understanding. Yours to extend.</p>
       </footer>

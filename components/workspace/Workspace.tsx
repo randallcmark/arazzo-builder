@@ -1,5 +1,6 @@
 "use client";
 
+import type { OnMount } from "@monaco-editor/react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -17,15 +18,21 @@ import {
   GitBranch,
   ListTree,
   Plus,
+  Redo2,
   RotateCcw,
+  Save,
   Share2,
+  Undo2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { siteConfig } from "@/config/site";
 import {
+  findWorkflowStepAtOffset,
+  findWorkflowStepRange,
   insertWorkflow,
   parseArazzo,
+  setWorkflowLayoutExtension,
   upsertSourceDescription,
-  workflowToFlowchart,
   workflowToSequence,
   type ArazzoSpec,
   type ArazzoWorkflow,
@@ -41,11 +48,19 @@ import {
   decodeStoredWorkspace,
   encodeStoredWorkspace,
 } from "@/lib/workspace-storage";
+import { workflowEdges } from "@/lib/workflow-graph";
+import {
+  defaultWorkflowLayout,
+  embeddedWorkflowLayout,
+  readStoredWorkflowLayout,
+  workflowLayoutExtension,
+} from "@/lib/workflow-layout";
 import { AddWorkflowDialog } from "./AddWorkflowDialog";
 import { ApiSourceDialog } from "./ApiSourceDialog";
 import { DocumentationView } from "./DocumentationView";
 import { FlowView } from "./FlowView";
 import { MermaidView } from "./MermaidView";
+import { SelectionInspector } from "./SelectionInspector";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -54,9 +69,9 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
 
 type ViewMode = "flow" | "flowchart" | "sequence" | "docs" | "yaml";
 
-const DRAFT_KEY = "arazzo-loom:deel-draft";
-const DEFAULT_DOCUMENT_URL = "/workflows/deel-arazzo.yml";
-const DEFAULT_DOCUMENT_NAME = "deel-arazzo.yml";
+const DRAFT_KEY = siteConfig.draftStorageKey;
+const DEFAULT_DOCUMENT_URL = siteConfig.defaultDocumentUrl;
+const DEFAULT_DOCUMENT_NAME = siteConfig.defaultDocumentName;
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
 const viewOptions: Array<{
@@ -74,11 +89,14 @@ const viewOptions: Array<{
 export function Workspace() {
   const [source, setSource] = useState("");
   const [baseline, setBaseline] = useState("");
-  const [workspaceName, setWorkspaceName] = useState(DEFAULT_DOCUMENT_NAME);
+  const [workspaceName, setWorkspaceName] = useState<string>(
+    DEFAULT_DOCUMENT_NAME,
+  );
   const [catalogues, setCatalogues] = useState<ApiCatalogue[]>([]);
   const [view, setView] = useState<ViewMode>("flow");
   const [activeWorkflowId, setActiveWorkflowId] = useState("");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [apiSourceOpen, setApiSourceOpen] = useState(false);
   const [status, setStatus] = useState("Loading published baseline…");
@@ -88,6 +106,100 @@ export function Workspace() {
   const [apiOperationQuery, setApiOperationQuery] = useState("");
   const loaded = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const sourceRef = useRef("");
+  const undoStack = useRef<string[]>([]);
+  const redoStack = useRef<string[]>([]);
+  const yamlHistoryStart = useRef<string | null>(null);
+  const yamlHistoryTimer = useRef<number | null>(null);
+  const yamlEditor = useRef<Parameters<OnMount>[0] | null>(null);
+  const yamlDecorations = useRef<string[]>([]);
+  const yamlCursorListener = useRef<{ dispose: () => void } | null>(null);
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+  });
+
+  const syncHistoryState = () => {
+    setHistoryState({
+      canUndo:
+        undoStack.current.length > 0 || yamlHistoryStart.current !== null,
+      canRedo: redoStack.current.length > 0,
+    });
+  };
+
+  const clearYamlTimer = () => {
+    if (yamlHistoryTimer.current !== null) {
+      window.clearTimeout(yamlHistoryTimer.current);
+      yamlHistoryTimer.current = null;
+    }
+  };
+
+  const finalizeYamlHistory = () => {
+    clearYamlTimer();
+    const start = yamlHistoryStart.current;
+    yamlHistoryStart.current = null;
+    if (start === null || start === sourceRef.current) return;
+    undoStack.current.push(start);
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    redoStack.current = [];
+    syncHistoryState();
+  };
+
+  const replaceSource = (nextSource: string, recordHistory = true) => {
+    finalizeYamlHistory();
+    const currentSource = sourceRef.current;
+    if (nextSource === currentSource) return;
+    if (recordHistory && currentSource) {
+      undoStack.current.push(currentSource);
+      if (undoStack.current.length > 100) undoStack.current.shift();
+      redoStack.current = [];
+    }
+    sourceRef.current = nextSource;
+    setSource(nextSource);
+    syncHistoryState();
+  };
+
+  const clearHistory = () => {
+    clearYamlTimer();
+    yamlHistoryStart.current = null;
+    undoStack.current = [];
+    redoStack.current = [];
+    syncHistoryState();
+  };
+
+  const handleYamlChange = (nextSource: string) => {
+    if (nextSource === sourceRef.current) return;
+    if (yamlHistoryStart.current === null) {
+      yamlHistoryStart.current = sourceRef.current;
+      syncHistoryState();
+    }
+    clearYamlTimer();
+    sourceRef.current = nextSource;
+    setSource(nextSource);
+    yamlHistoryTimer.current = window.setTimeout(finalizeYamlHistory, 750);
+  };
+
+  const handleUndo = () => {
+    finalizeYamlHistory();
+    const previous = undoStack.current.pop();
+    if (previous === undefined) return;
+    redoStack.current.push(sourceRef.current);
+    sourceRef.current = previous;
+    setSource(previous);
+    syncHistoryState();
+    setStatus("Undid the last document change");
+  };
+
+  const handleRedo = () => {
+    finalizeYamlHistory();
+    const next = redoStack.current.pop();
+    if (next === undefined) return;
+    undoStack.current.push(sourceRef.current);
+    sourceRef.current = next;
+    setSource(next);
+    syncHistoryState();
+    setStatus("Redid the document change");
+  };
 
   const result = useMemo(() => parseArazzo(source), [source]);
   const errors = result.diagnostics.filter(
@@ -109,12 +221,20 @@ export function Workspace() {
     spec?.workflows.find((candidate) => candidate.workflowId === activeWorkflowId) ??
     spec?.workflows[0] ??
     null;
+  const graphEdges = useMemo(
+    () => (workflow ? workflowEdges(workflow) : []),
+    [workflow],
+  );
+  const selectedEdge =
+    graphEdges.find((edge) => edge.id === selectedEdgeId) ?? null;
+  const embeddedLayout = workflow ? embeddedWorkflowLayout(workflow) : null;
+  const { canUndo, canRedo } = historyState;
 
   useEffect(() => {
     const load = async () => {
       const documentResponse = await fetch(DEFAULT_DOCUMENT_URL);
       if (!documentResponse.ok) {
-        throw new Error("The published Deel workflow could not be loaded.");
+        throw new Error("The published workflow could not be loaded.");
       }
       const publishedSource = await documentResponse.text();
       setBaseline(publishedSource);
@@ -126,14 +246,20 @@ export function Workspace() {
         const savedWorkspace = decodeStoredWorkspace(savedDraft);
         initialSource = savedWorkspace.source;
         savedCatalogues = savedWorkspace.catalogues;
+        sourceRef.current = initialSource;
         setSource(initialSource);
         setBaseline(savedWorkspace.baseline);
         setWorkspaceName(savedWorkspace.name);
         setStatus("Local draft restored");
       } else {
+        sourceRef.current = initialSource;
         setSource(initialSource);
         setStatus("Published baseline");
       }
+      undoStack.current = [];
+      redoStack.current = [];
+      yamlHistoryStart.current = null;
+      setHistoryState({ canUndo: false, canRedo: false });
 
       if (savedCatalogues?.length) {
         setCatalogues(savedCatalogues);
@@ -152,6 +278,14 @@ export function Workspace() {
       setStatus(error instanceof Error ? error.message : "Unable to load workspace.");
     });
   }, []);
+
+  useEffect(
+    () => () => {
+      clearYamlTimer();
+      yamlCursorListener.current?.dispose();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!loaded.current || !source) return;
@@ -182,7 +316,7 @@ export function Workspace() {
     ) {
       return;
     }
-    setSource(baseline);
+    replaceSource(baseline);
     const baselineSpec = parseArazzo(baseline).spec;
     if (baselineSpec) {
       void loadCataloguesForSpec(baselineSpec).then((nextCatalogues) => {
@@ -224,11 +358,14 @@ export function Workspace() {
         return;
       }
 
+      sourceRef.current = importedSource;
       setSource(importedSource);
+      clearHistory();
       setBaseline(importedSource);
       setWorkspaceName(safeDocumentName(file.name));
       setActiveWorkflowId(importedResult.spec.workflows?.[0]?.workflowId ?? "");
       setSelectedStepId(null);
+      setSelectedEdgeId(null);
       setView(
         importedResult.diagnostics.some(
           (diagnostic) => diagnostic.severity === "error",
@@ -264,7 +401,7 @@ export function Workspace() {
       type: "openapi",
       url: referenceUrl,
     });
-    setSource(nextSource);
+    replaceSource(nextSource);
     setCatalogues((current) => [
       ...current.filter(
         (candidate) => candidate.sourceName !== catalogue.sourceName,
@@ -316,9 +453,10 @@ export function Workspace() {
   const handleInsert = (newWorkflow: ArazzoWorkflow) => {
     try {
       const nextSource = insertWorkflow(source, newWorkflow);
-      setSource(nextSource);
+      replaceSource(nextSource);
       setActiveWorkflowId(newWorkflow.workflowId);
       setSelectedStepId(null);
+      setSelectedEdgeId(null);
       setBuilderOpen(false);
       setView("flow");
       setStatus(`Inserted ${newWorkflow.workflowId}`);
@@ -326,6 +464,106 @@ export function Workspace() {
       setStatus(error instanceof Error ? error.message : "Unable to insert workflow.");
     }
   };
+
+  const handleToggleEmbeddedLayout = () => {
+    if (!workflow) return;
+    try {
+      const nextSource = setWorkflowLayoutExtension(
+        source,
+        workflow.workflowId,
+        embeddedLayout
+          ? null
+          : workflowLayoutExtension(
+              readStoredWorkflowLayout(workspaceName, workflow.workflowId) ??
+                defaultWorkflowLayout(workflow),
+            ),
+      );
+      replaceSource(nextSource);
+      setStatus(
+        embeddedLayout
+          ? "Removed the portable layout from YAML"
+          : "Embedded the current Flow layout in YAML",
+      );
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "Unable to update the layout.",
+      );
+    }
+  };
+
+  const revealYamlStep = (
+    editor: Parameters<OnMount>[0],
+    documentSource: string,
+    workflowId: string,
+    stepId: string,
+  ) => {
+    const range = findWorkflowStepRange(documentSource, workflowId, stepId);
+    const model = editor.getModel();
+    if (!range || !model) return;
+    const start = model.getPositionAt(range.start);
+    const end = model.getPositionAt(range.end);
+    const editorRange = {
+      startLineNumber: start.lineNumber,
+      startColumn: start.column,
+      endLineNumber: end.lineNumber,
+      endColumn: end.column,
+    };
+    yamlDecorations.current = editor.deltaDecorations(
+      yamlDecorations.current,
+      [
+        {
+          range: editorRange,
+          options: {
+            isWholeLine: true,
+            className: "yaml-step-highlight",
+          },
+        },
+      ],
+    );
+    editor.revealRangeInCenter(editorRange);
+  };
+
+  const handleYamlMount: OnMount = (editor) => {
+    yamlEditor.current = editor;
+    yamlCursorListener.current?.dispose();
+    yamlCursorListener.current = editor.onDidChangeCursorPosition((event) => {
+      const model = editor.getModel();
+      if (!model) return;
+      const match = findWorkflowStepAtOffset(
+        sourceRef.current,
+        model.getOffsetAt(event.position),
+      );
+      if (!match) return;
+      setActiveWorkflowId(match.workflowId);
+      setSelectedStepId(match.stepId);
+      setSelectedEdgeId(null);
+    });
+    if (workflow && selectedStepId) {
+      revealYamlStep(
+        editor,
+        sourceRef.current,
+        workflow.workflowId,
+        selectedStepId,
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (view !== "yaml" || !yamlEditor.current) return;
+    if (!workflow || !selectedStepId) {
+      yamlDecorations.current = yamlEditor.current.deltaDecorations(
+        yamlDecorations.current,
+        [],
+      );
+      return;
+    }
+    revealYamlStep(
+      yamlEditor.current,
+      source,
+      workflow.workflowId,
+      selectedStepId,
+    );
+  }, [source, selectedStepId, view, workflow]);
 
   return (
     <main
@@ -378,7 +616,7 @@ export function Workspace() {
               <span />
               <span />
             </span>
-            <span>Arazzo Loom</span>
+            <span>{siteConfig.productName}</span>
           </Link>
           <span className="header-divider" />
           <div className="file-identity">
@@ -457,6 +695,7 @@ export function Workspace() {
                 onClick={() => {
                   setActiveWorkflowId(candidate.workflowId);
                   setSelectedStepId(null);
+                  setSelectedEdgeId(null);
                 }}
               >
                 <span>{String(index + 1).padStart(2, "0")}</span>
@@ -496,19 +735,58 @@ export function Workspace() {
                   aria-selected={view === id}
                   className={view === id ? "is-active" : ""}
                   key={id}
-                  onClick={() => setView(id)}
+                  onClick={() => {
+                    setView(id);
+                    if (id === "sequence") setSelectedEdgeId(null);
+                  }}
                 >
                   <Icon size={15} />
                   {label}
                 </button>
               ))}
             </div>
-            {workflow && (
-              <div className="active-workflow-label">
-                <Circle size={8} fill="currentColor" />
-                {workflow.workflowId}
-              </div>
-            )}
+            <div className="workspace-toolbar-actions">
+              <button
+                className="icon-button"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                aria-label="Undo document change"
+                title="Undo"
+              >
+                <Undo2 size={14} />
+              </button>
+              <button
+                className="icon-button"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                aria-label="Redo document change"
+                title="Redo"
+              >
+                <Redo2 size={14} />
+              </button>
+              {workflow && (
+                <>
+                  <button
+                    className={`quiet-button layout-extension-button ${
+                      embeddedLayout ? "is-active" : ""
+                    }`}
+                    onClick={handleToggleEmbeddedLayout}
+                    title={
+                      embeddedLayout
+                        ? "Remove x-loom-layout from this workflow"
+                        : "Embed the current Flow arrangement as x-loom-layout"
+                    }
+                  >
+                    <Save size={13} />
+                    {embeddedLayout ? "Layout embedded" : "Embed layout"}
+                  </button>
+                  <div className="active-workflow-label">
+                    <Circle size={8} fill="currentColor" />
+                    {workflow.workflowId}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div className={`workspace-canvas workspace-canvas--${view}`}>
@@ -538,12 +816,51 @@ export function Workspace() {
               <FlowView
                 workflow={workflow}
                 selectedStepId={selectedStepId}
+                selectedEdgeId={selectedEdgeId}
                 onStepSelect={setSelectedStepId}
+                onEdgeSelect={setSelectedEdgeId}
+                mode="flow"
+                layoutScope={workspaceName}
+                onLayoutChange={(layout) => {
+                  if (!embeddedLayout) return;
+                  try {
+                    replaceSource(
+                      setWorkflowLayoutExtension(
+                        source,
+                        workflow.workflowId,
+                        workflowLayoutExtension(layout),
+                      ),
+                    );
+                    setStatus("Embedded Flow layout updated");
+                  } catch (error) {
+                    setStatus(
+                      error instanceof Error
+                        ? error.message
+                        : "Unable to update the embedded layout.",
+                    );
+                  }
+                }}
               />
             ) : view === "flowchart" ? (
-              <MermaidView chart={workflowToFlowchart(workflow)} />
+              <FlowView
+                workflow={workflow}
+                selectedStepId={selectedStepId}
+                selectedEdgeId={selectedEdgeId}
+                onStepSelect={setSelectedStepId}
+                onEdgeSelect={setSelectedEdgeId}
+                mode="chart"
+                layoutScope={workspaceName}
+              />
             ) : view === "sequence" ? (
-              <MermaidView chart={workflowToSequence(spec, workflow)} />
+              <MermaidView
+                chart={workflowToSequence(spec, workflow)}
+                interactiveStepIds={workflow.steps.map((step) => step.stepId)}
+                selectedStepId={selectedStepId}
+                onStepSelect={(stepId) => {
+                  setSelectedStepId(stepId);
+                  setSelectedEdgeId(null);
+                }}
+              />
             ) : view === "docs" ? (
               <DocumentationView
                 workflow={workflow}
@@ -555,7 +872,8 @@ export function Workspace() {
                   height="100%"
                   defaultLanguage="yaml"
                   value={source}
-                  onChange={(value) => setSource(value ?? "")}
+                  onMount={handleYamlMount}
+                  onChange={(value) => handleYamlChange(value ?? "")}
                   theme="vs"
                   options={{
                     minimap: { enabled: false },
@@ -660,84 +978,20 @@ export function Workspace() {
           </div>
         </section>
 
-        {view === "flow" && selectedStepId && workflow && (
-          <aside className="step-inspector">
-            {(() => {
-              const step = workflow.steps.find(
-                (candidate) => candidate.stepId === selectedStepId,
-              );
-              if (!step) return null;
-              const operationDetails = resolveCatalogueOperation(
-                step.operationId,
-                catalogues,
-              );
-              return (
-                <>
-                  <header>
-                    <div>
-                      <p className="view-eyebrow">Selected step</p>
-                      <h2>{step.stepId}</h2>
-                    </div>
-                    <button
-                      className="icon-button"
-                      onClick={() => setSelectedStepId(null)}
-                      aria-label="Close step inspector"
-                    >
-                      <ChevronDown size={17} />
-                    </button>
-                  </header>
-                  <div className="inspector-body">
-                    <section>
-                      <span>Operation</span>
-                      <code>{step.operationId ?? step.operationPath ?? step.workflowId}</code>
-                    </section>
-                    {operationDetails && (
-                      <section className="resolved-operation">
-                        <span>Resolved from OpenAPI</span>
-                        <strong>
-                          {operationDetails.catalogue.title}
-                          <small>
-                            sourceDescriptions.{operationDetails.catalogue.sourceName}
-                          </small>
-                        </strong>
-                        <p>{operationDetails.operation.summary}</p>
-                        <code>
-                          {operationDetails.operation.method}{" "}
-                          {operationDetails.operation.path}
-                        </code>
-                        <small>{operationDetails.catalogue.location}</small>
-                      </section>
-                    )}
-                    {step.description && (
-                      <section>
-                        <span>Description</span>
-                        <p>{step.description}</p>
-                      </section>
-                    )}
-                    {step.successCriteria?.length ? (
-                      <section>
-                        <span>Success criteria</span>
-                        {step.successCriteria.map((criterion, index) => (
-                          <code key={index}>{criterion.condition}</code>
-                        ))}
-                      </section>
-                    ) : null}
-                    {step.outputs && (
-                      <section>
-                        <span>Outputs</span>
-                        {Object.entries(step.outputs).map(([name, expression]) => (
-                          <code key={name}>
-                            {name} = {expression}
-                          </code>
-                        ))}
-                      </section>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-          </aside>
-        )}
+        {workflow &&
+          (selectedStepId || selectedEdge) &&
+          ["flow", "flowchart", "sequence"].includes(view) && (
+            <SelectionInspector
+              workflow={workflow}
+              selectedStepId={selectedStepId}
+              selectedEdge={selectedEdge}
+              catalogues={catalogues}
+              onClose={() => {
+                setSelectedStepId(null);
+                setSelectedEdgeId(null);
+              }}
+            />
+          )}
       </div>
 
       <AddWorkflowDialog
@@ -847,21 +1101,6 @@ function mergeOperations(
   return Array.from(merged.values()).sort((a, b) =>
     a.summary.localeCompare(b.summary),
   );
-}
-
-function resolveCatalogueOperation(
-  reference: string | undefined,
-  catalogues: ApiCatalogue[],
-): { catalogue: ApiCatalogue; operation: OpenApiOperation } | null {
-  const parts = operationReferenceParts(reference);
-  if (!parts) return null;
-  const catalogue = catalogues.find(
-    (candidate) => candidate.sourceName === parts.sourceName,
-  );
-  const operation = catalogue?.operations.find(
-    (candidate) => candidate.id === parts.operationId,
-  );
-  return catalogue && operation ? { catalogue, operation } : null;
 }
 
 function operationMatches(
