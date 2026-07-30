@@ -2532,7 +2532,7 @@ a {
   }
 }
 
-/* Arazzo Loom's Deel-inspired theme: optimistic colour, chunky shapes, soft UI */
+/* Arazzo Builder's Deel-inspired theme: optimistic colour, chunky shapes, soft UI */
 
 body {
   background:
@@ -3314,6 +3314,36 @@ body {
   .visual-builder-body {
     grid-template-columns: 190px minmax(520px, 1fr) 250px;
   }
+}
+
+.route-error {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  justify-items: start;
+  gap: 14px;
+  padding: 32px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.route-error > svg {
+  color: var(--red);
+}
+
+.route-error h1,
+.route-error p {
+  max-width: 640px;
+  margin: 0;
+}
+
+.route-error h1 {
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 0.98;
+}
+
+.route-error > small {
+  color: var(--ink-soft);
 }
 
 @media (prefers-reduced-motion: reduce) {

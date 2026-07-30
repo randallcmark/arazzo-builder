@@ -104,6 +104,29 @@ export function MermaidView({
     });
   }, [interactiveStepIds, selectedStepId, svg]);
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey) {
+        setZoom((current) =>
+          Math.min(
+            MAX_ZOOM,
+            Math.max(MIN_ZOOM, current - event.deltaY * 0.002),
+          ),
+        );
+      } else {
+        setOffset((current) => ({
+          x: current.x - event.deltaX,
+          y: current.y - event.deltaY,
+        }));
+      }
+    };
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleWheel);
+  }, []);
+
   const changeZoom = (nextZoom: number) => {
     setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom)));
   };
@@ -204,17 +227,6 @@ export function MermaidView({
       <div
         ref={viewportRef}
         className="mermaid-viewport"
-        onWheel={(event) => {
-          event.preventDefault();
-          if (event.ctrlKey || event.metaKey) {
-            changeZoom(zoom - event.deltaY * 0.002);
-          } else {
-            setOffset((current) => ({
-              x: current.x - event.deltaX,
-              y: current.y - event.deltaY,
-            }));
-          }
-        }}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
           panMoved.current = false;

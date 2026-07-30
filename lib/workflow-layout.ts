@@ -28,7 +28,8 @@ export function defaultWorkflowLayout(
 export function embeddedWorkflowLayout(
   workflow: ArazzoWorkflow,
 ): WorkflowNodeLayout | null {
-  const extension = workflow["x-loom-layout"];
+  const extension =
+    workflow["x-arazzo-builder-layout"] ?? workflow["x-loom-layout"];
   if (
     !extension ||
     extension.version !== 1 ||
@@ -60,14 +61,22 @@ export function readStoredWorkflowLayout(
   workflowId: string,
 ): WorkflowNodeLayout | null {
   if (typeof window === "undefined") return null;
-  try {
-    const value = window.localStorage.getItem(layoutKey(scope, workflowId));
-    if (!value) return null;
-    const parsed = JSON.parse(value) as WorkflowNodeLayout;
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
+  for (const namespace of [
+    siteConfig.storageNamespace,
+    ...siteConfig.legacyStorageNamespaces,
+  ]) {
+    try {
+      const value = window.localStorage.getItem(
+        layoutKey(scope, workflowId, namespace),
+      );
+      if (!value) continue;
+      const parsed = JSON.parse(value) as WorkflowNodeLayout;
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      // A malformed legacy layout must not block a valid current layout.
+    }
   }
+  return null;
 }
 
 export function writeStoredWorkflowLayout(
@@ -85,6 +94,10 @@ export function writeStoredWorkflowLayout(
   }
 }
 
-function layoutKey(scope: string, workflowId: string) {
-  return `${siteConfig.storageNamespace}:layout:${scope}:${workflowId}`;
+function layoutKey(
+  scope: string,
+  workflowId: string,
+  namespace: string = siteConfig.storageNamespace,
+) {
+  return `${namespace}:layout:${scope}:${workflowId}`;
 }

@@ -5,6 +5,7 @@ export type OpenApiOperation = {
   method: string;
   path: string;
   summary: string;
+  resolved: boolean;
   sourceName?: string;
   sourceTitle?: string;
 };
@@ -44,6 +45,8 @@ const METHODS = new Set([
   "options",
 ]);
 
+export const OPERATION_RESULT_LIMIT = 180;
+
 export function extractOperations(
   document: OpenApiDocument,
   sourceName?: string,
@@ -58,6 +61,7 @@ export function extractOperations(
         method: method.toUpperCase(),
         path,
         summary: operation.summary ?? operation.operationId,
+        resolved: true,
         ...(sourceName ? { sourceName } : {}),
         ...(sourceTitle ? { sourceTitle } : {}),
       });
@@ -104,4 +108,31 @@ export function operationReferenceParts(reference?: string): {
   const match = reference.match(/^\$sourceDescriptions\.([^.]+)\.(.+)$/);
   if (!match) return null;
   return { sourceName: match[1], operationId: match[2] };
+}
+
+export function canAutoLoadOpenApiReference(
+  reference: string,
+  pageUrl: string,
+): boolean {
+  try {
+    const page = new URL(pageUrl);
+    const target = new URL(reference, page);
+    return (
+      (target.protocol === "http:" || target.protocol === "https:") &&
+      target.origin === page.origin
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function operationMatches(
+  operation: OpenApiOperation,
+  query: string,
+): boolean {
+  const cleanQuery = query.trim().toLowerCase();
+  if (!cleanQuery) return true;
+  return [operation.id, operation.method, operation.path, operation.summary].some(
+    (value) => value.toLowerCase().includes(cleanQuery),
+  );
 }

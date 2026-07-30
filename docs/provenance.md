@@ -12,7 +12,7 @@ application are included in this repository.
 The colour and shape direction is independently informed by Deel's public 2025
 brand-refresh article: optimistic blue, purple, and yellow; rounded product
 surfaces; and chunky abstract forms. No Deel logo, Bagoss font, illustration,
-product screenshot, or other Deel-owned asset is included. Arazzo Loom retains
+product screenshot, or other Deel-owned asset is included. Arazzo Builder retains
 its own name, weave mark, layouts, components, and generated social artwork.
 
 The bundled `deel-arazzo.yml` and compact `deel-openapi.json` are

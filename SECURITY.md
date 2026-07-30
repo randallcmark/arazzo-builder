@@ -9,8 +9,9 @@ This project is a browser-local workflow tool, not a security boundary.
   storage is cleared.
 - Exported files are created by the browser and are not uploaded by the
   application.
-- Remote OpenAPI URLs are requested directly by the browser and are subject to
-  the destination's CORS policy.
+- Cross-origin OpenAPI URLs are requested directly by the browser only after an
+  explicit action in the API source dialog and are subject to the destination's
+  CORS policy.
 - The application has no account system, authorization model, secret store, or
   shared server-side persistence.
 
@@ -40,6 +41,10 @@ ESLint 10 change that is outside those plugins' declared peer support. This
 exception should be removed when the Next.js ESLint toolchain supports the
 patched dependency path.
 
+Dependency lifecycle scripts are governed by npm's native, strict
+`allowScripts` policy. The required npm version is declared in `package.json`;
+older npm clients are not supported because they do not enforce this control.
+
 ## Supported version
 
 Security fixes target the latest revision of `main`. Older forks and deployed
@@ -47,7 +52,7 @@ revisions must be assessed independently.
 
 ## Reporting
 
-Use the repository's private vulnerability-reporting facility when it is
-enabled. For non-sensitive defects, open a GitHub issue with reproduction
-steps. Do not publish credentials, private API descriptions, or active secrets
-in an issue.
+Use the repository's enabled GitHub Private Vulnerability Reporting facility
+for sensitive findings. For non-sensitive defects, open a GitHub issue with
+reproduction steps. Do not publish credentials, private API descriptions, or
+active secrets in an issue.

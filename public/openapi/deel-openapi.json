@@ -3,7 +3,7 @@
   "info": {
     "title": "Deel API starter operation catalogue",
     "version": "2026-01-01",
-    "description": "A compact local catalogue for the Arazzo Loom starter. Replace with the generator's source OpenAPI document."
+    "description": "A compact local catalogue for the Arazzo Builder starter. Replace with the generator's source OpenAPI document."
   },
   "servers": [
     {

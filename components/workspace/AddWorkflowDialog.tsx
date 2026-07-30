@@ -26,7 +26,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { ArazzoWorkflow } from "@/lib/arazzo";
-import type { OpenApiOperation } from "@/lib/openapi";
+import {
+  OPERATION_RESULT_LIMIT,
+  operationMatches,
+  type OpenApiOperation,
+} from "@/lib/openapi";
+import { useDialogFocus } from "./useDialogFocus";
 
 const OPERATION_MIME = "application/arazzo-operation";
 
@@ -144,6 +149,7 @@ function VisualWorkflowBuilder({
     useNodesState<Node<BuilderNodeData>>(endpointNodes);
   const { screenToFlowPosition, fitView } = useReactFlow();
   const counter = useRef(0);
+  const dialogRef = useDialogFocus<HTMLElement>(true, onClose);
 
   const selectedIndex = steps.findIndex(
     (step) => step.nodeId === selectedNodeId,
@@ -154,9 +160,7 @@ function VisualWorkflowBuilder({
     () =>
       operations.filter((operation) =>
         (sourceFilter === "all" || operation.sourceName === sourceFilter) &&
-        [operation.id, operation.method, operation.path, operation.summary].some(
-          (value) => value.toLowerCase().includes(cleanQuery),
-        ),
+        operationMatches(operation, cleanQuery),
       ),
     [cleanQuery, operations, sourceFilter],
   );
@@ -263,6 +267,7 @@ function VisualWorkflowBuilder({
       method: "CUSTOM",
       path: "Manual operation reference",
       summary: id,
+      resolved: false,
       sourceName: manualSourceName,
     });
     setManualOperation("");
@@ -375,12 +380,15 @@ function VisualWorkflowBuilder({
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         className="workflow-dialog workflow-dialog--visual"
         role="dialog"
         aria-modal="true"
         aria-labelledby="workflow-dialog-title"
+        tabIndex={-1}
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
           <div>
@@ -451,7 +459,9 @@ function VisualWorkflowBuilder({
               </label>
             )}
             <div className="operation-list">
-              {filteredOperations.slice(0, 180).map((operation) => (
+              {filteredOperations
+                .slice(0, OPERATION_RESULT_LIMIT)
+                .map((operation) => (
                 <button
                   className="operation-card"
                   key={`${operation.sourceName ?? "api"}:${operation.id}`}
@@ -479,16 +489,16 @@ function VisualWorkflowBuilder({
                   </span>
                   <Plus size={14} />
                 </button>
-              ))}
+                ))}
               {!filteredOperations.length && (
                 <p className="operation-empty">
                   No matching catalogue operations. Add an operation ID below.
                 </p>
               )}
-              {filteredOperations.length > 180 && (
+              {filteredOperations.length > OPERATION_RESULT_LIMIT && (
                 <p className="operation-limit">
-                  Showing 180 of {filteredOperations.length}. Narrow the list with
-                  search or the API filter.
+                  Showing {OPERATION_RESULT_LIMIT} of {filteredOperations.length}.
+                  Narrow the list with search or the API filter.
                 </p>
               )}
             </div>

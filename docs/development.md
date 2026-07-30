@@ -2,19 +2,24 @@
 
 ## Requirements
 
-- Node.js 20.9 or newer.
-- npm, using the committed `package-lock.json`.
+- Node.js 20.17 or newer.
+- npm 11.16 or newer, using the committed `package-lock.json`.
 
 ## Local setup
 
 ```bash
 nvm use
+npm install --global npm@11.17.0
 cp .env.example .env.local
 npm ci
 npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+If `nvm` is not installed, use any Node.js installation that satisfies the
+declared engine. The npm upgrade is still required when that installation
+ships an older npm release.
 
 ## Reproducible validation
 
@@ -29,6 +34,11 @@ This runs:
 1. Vitest unit tests.
 2. ESLint with the Next.js Core Web Vitals and TypeScript rules.
 3. A production Next.js build and TypeScript check.
+
+CI actions are pinned to reviewed commit SHAs and updated through the committed
+Dependabot configuration. CodeQL and dependency-review workflows are not
+enabled at this project size; production audit, tests, lint, and the production
+build remain the required checks.
 
 For a dependency advisory check:
 
@@ -63,13 +73,22 @@ The affected packages are not shipped in the production application. Do not
 force ESLint 10 while the installed Next.js ESLint plugins declare support only
 through ESLint 9; upgrade that toolchain together when its peer ranges permit.
 
-The `allowScripts` policy approves only the exact installed versions of
-`fsevents` and `unrs-resolver`. Review and re-approve them when either pinned
-version changes; do not replace the policy with a blanket script allowance.
+This repository requires npm 11.16 or newer and enables
+`strict-allow-scripts=true` in `.npmrc`. The native npm `allowScripts` policy
+therefore blocks an install when a dependency has an unreviewed lifecycle
+script. Only the exact installed versions of `fsevents` and `unrs-resolver` are
+approved. Review and re-approve them when either pinned version changes; do not
+replace the policy with a blanket script allowance.
 
-Tests live beside the modules they exercise in `lib/*.test.ts`. New mutation
+Use the package-manager version declared in `package.json`. Older npm clients
+do not implement this policy and are rejected by the repository's engine
+requirements.
+
+Tests live beside the modules they exercise. Library behavior uses the default
+Vitest Node environment; React interaction tests opt into jsdom. New mutation
 behavior should have tests for both the parsed result and preservation of
-unrelated YAML content such as comments.
+unrelated YAML content such as comments. User-facing regressions should receive
+an interaction test where practical.
 
 ## Fork customization
 

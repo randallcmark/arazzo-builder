@@ -22,6 +22,7 @@ describe("workspace storage", () => {
               method: "GET",
               path: "/hello",
               summary: "Say hello",
+              resolved: true,
               sourceName: "family",
             },
           ],
@@ -42,6 +43,36 @@ describe("workspace storage", () => {
       baseline: source,
       name: "deel-arazzo.yml",
       catalogues: undefined,
+    });
+  });
+
+  it("migrates unresolved operation sentinels in saved catalogues", () => {
+    const stored = JSON.stringify({
+      source: "arazzo: 1.0.1",
+      baseline: "arazzo: 1.0.1",
+      name: "legacy.yml",
+      catalogues: [
+        {
+          sourceName: "family",
+          title: "Family",
+          location: "https://example.com/openapi.json",
+          operations: [
+            {
+              id: "sayHello",
+              method: "OP",
+              path: "Referenced by imported Arazzo",
+              summary: "sayHello",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      decodeStoredWorkspace(stored).catalogues?.[0].operations[0],
+    ).toMatchObject({
+      method: "REF",
+      resolved: false,
     });
   });
 });

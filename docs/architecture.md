@@ -6,7 +6,7 @@ conversations or undocumented assumptions.
 
 ## System shape
 
-Arazzo Loom is a stateless Next.js application. The server supplies static
+Arazzo Builder is a stateless Next.js application. The server supplies static
 application assets and starter files; document work happens in the browser.
 
 ```text
@@ -36,7 +36,7 @@ mutation, or shared draft store.
 5. Structured mutations use the YAML syntax tree in `lib/arazzo.ts`; they must
    not rebuild the complete document from parsed JavaScript objects.
 6. Flow coordinates are browser-local unless the user explicitly enables the
-   `x-loom-layout` extension.
+   `x-arazzo-builder-layout` extension.
 7. Browser draft failure must not prevent importing, viewing, editing, or
    exporting the current in-memory document.
 
@@ -47,8 +47,16 @@ mutation, or shared draft store.
 - `app/` — routes, metadata, and global visual system.
 - `components/workspace/Workspace.tsx` — workspace coordination and view state.
 - `components/workspace/AddWorkflowDialog.tsx` — visual workflow composer.
+- `components/workspace/YamlWorkspacePanel.tsx` — Monaco and the API reference
+  and diagnostics side panel.
+- `components/workspace/useDocumentHistory.ts` — exact-source undo and redo.
+- `components/workspace/useDialogFocus.ts` — shared modal focus lifecycle.
+- `components/workspace/useWorkspaceDraft.ts` — published baseline loading,
+  browser-local draft restoration, and autosave.
 - `lib/arazzo.ts` — parsing, diagnostics, source-preserving mutations, diagram
   projections, and YAML range mapping.
+- `lib/api-catalogues.ts` — trusted catalogue loading and unresolved Arazzo
+  operation fallbacks.
 - `lib/openapi.ts` — OpenAPI parsing and operation catalogue construction.
 - `lib/workflow-graph.ts` — read-only graph projection of Arazzo semantics.
 - `lib/workflow-layout.ts` — local and optional embedded presentation layout.
@@ -67,9 +75,15 @@ are not a complete Arazzo conformance validator.
 
 ### Remote OpenAPI URLs
 
-The browser fetches a URL supplied by the user. The request is subject to the
-remote server's CORS policy. The application does not proxy the request, attach
-server credentials, or bypass browser network controls.
+The browser fetches a cross-origin URL only when the user explicitly enters it
+in the API source dialog. Relative and same-origin source descriptions may be
+loaded automatically. Importing an Arazzo document does not automatically
+request its cross-origin source URLs; operation IDs referenced by that document
+remain available as an unresolved fallback catalogue.
+
+Remote requests are subject to the destination's CORS policy. The application
+does not proxy the request, attach server credentials, or bypass browser
+network controls.
 
 ### Mermaid output
 
@@ -82,7 +96,9 @@ an intentional review hotspot in `components/workspace/MermaidView.tsx`.
 
 Drafts and canvas coordinates use `localStorage` under the namespace declared
 in `config/site.ts`. They are scoped to the browser origin and device, are not
-shared with other users, and can be removed by browser storage controls.
+shared with other users, and can be removed by browser storage controls. Legacy
+`arazzo-loom` keys are read only to migrate drafts and layouts created before
+the public name was aligned with the repository.
 
 ### Export
 
@@ -91,10 +107,10 @@ write to the server or the checked-out Git repository.
 
 ## Custom extension
 
-`x-loom-layout` is optional workflow metadata:
+`x-arazzo-builder-layout` is optional workflow metadata:
 
 ```yaml
-x-loom-layout:
+x-arazzo-builder-layout:
   version: 1
   nodes:
     input: { x: 40, y: 165 }
@@ -102,6 +118,8 @@ x-loom-layout:
 ```
 
 It affects presentation only. It must never be interpreted as execution order.
+Documents containing the former `x-loom-layout` key remain readable during the
+rename transition. New mutations write only `x-arazzo-builder-layout`.
 
 ## Deliberate limitations
 

@@ -1,4 +1,4 @@
-# Arazzo Loom
+# Arazzo Builder
 
 A local-first Next.js workspace for exploring, editing, and extending Arazzo
 API workflow documents.
@@ -16,6 +16,8 @@ API workflow documents.
 - Connects named OpenAPI sources from a URL or local YAML/JSON file, enumerates
   their `operationId` values, and writes the source into the Arazzo
   `sourceDescriptions` collection.
+- Loads relative and same-origin source descriptions automatically; imported
+  cross-origin URLs require an explicit action in the API source dialog.
 - Resolves source-qualified workflow operations back to their API, method, path,
   and summary in both the visual workflow inspector and YAML reference browser.
 - Keeps freeform Flow card positions in browser-local presentation state while
@@ -31,7 +33,7 @@ API workflow documents.
 - Provides document-level undo and redo while preserving the exact YAML source,
   including comments.
 - Keeps Flow coordinates browser-local unless the user explicitly embeds the
-  portable `x-loom-layout` workflow extension.
+  portable `x-arazzo-builder-layout` workflow extension.
 - Validates core Arazzo structure and cross-step `goto` references.
 - Exports the current document without requiring server-side storage.
 
@@ -41,8 +43,12 @@ available.
 
 ## Run locally
 
+Use Node.js 20.17 or newer and npm 11.16 or newer. The repository pins its
+reviewed npm release in `package.json`.
+
 ```bash
 nvm use
+npm install --global npm@11.17.0
 cp .env.example .env.local
 npm ci
 npm run dev
@@ -57,7 +63,8 @@ npm run check
 ```
 
 GitHub Actions runs the same locked install and validation command for pushes
-to `main` and for pull requests.
+to `main` and for pull requests. The install fails when a dependency introduces
+an unreviewed lifecycle script.
 
 ## Customize a fork
 

@@ -36,16 +36,26 @@ describe("workflow layout", () => {
     };
     const withLayout: ArazzoWorkflow = {
       ...workflow,
-      "x-loom-layout": workflowLayoutExtension(nodes),
+      "x-arazzo-builder-layout": workflowLayoutExtension(nodes),
     };
 
     expect(embeddedWorkflowLayout(withLayout)).toEqual(nodes);
   });
 
+  it("reads the legacy layout extension during the rename transition", () => {
+    const nodes = { first: { x: 120, y: 80 } };
+    const legacyWorkflow: ArazzoWorkflow = {
+      ...workflow,
+      "x-loom-layout": workflowLayoutExtension(nodes),
+    };
+
+    expect(embeddedWorkflowLayout(legacyWorkflow)).toEqual(nodes);
+  });
+
   it("ignores unsupported layout versions", () => {
     const withFutureLayout = {
       ...workflow,
-      "x-loom-layout": {
+      "x-arazzo-builder-layout": {
         version: 2,
         nodes: { first: { x: 1, y: 2 } },
       },

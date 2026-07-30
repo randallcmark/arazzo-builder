@@ -3,8 +3,6 @@ import {
   isSeq,
   parseDocument,
   type Document,
-  type Node,
-  type ParsedNode,
 } from "yaml";
 
 export type ArazzoSource = {
@@ -58,6 +56,8 @@ export type ArazzoWorkflow = {
   };
   steps: ArazzoStep[];
   outputs?: Record<string, string>;
+  "x-arazzo-builder-layout"?: ArazzoWorkflowLayout;
+  /** @deprecated Read only for documents created before the public rename. */
   "x-loom-layout"?: ArazzoWorkflowLayout;
 };
 
@@ -112,6 +112,14 @@ export function parseArazzo(source: string): ParseResult {
     };
   }
 
+  const shapeDiagnostics = workspaceShapeDiagnostics(value);
+  if (shapeDiagnostics.length) {
+    return {
+      spec: null,
+      diagnostics: [...diagnostics, ...shapeDiagnostics],
+    };
+  }
+
   const spec = value as ArazzoSpec;
   diagnostics.push(...validateArazzo(spec));
   return { spec, diagnostics };
@@ -160,28 +168,31 @@ export function validateArazzo(spec: ArazzoSpec): Diagnostic[] {
   }
 
   const workflowIds = new Set<string>();
-  for (const workflow of spec.workflows) {
-    const workflowPath = `workflows.${workflow.workflowId || "unknown"}`;
+  for (const [workflowIndex, workflow] of spec.workflows.entries()) {
+    const workflowPath = `workflows[${workflowIndex}]`;
     if (!workflow.workflowId) {
       diagnostics.push({
         severity: "error",
         message: "Every workflow requires a workflowId.",
         path: workflowPath,
       });
-    } else if (!ID_PATTERN.test(workflow.workflowId)) {
-      diagnostics.push({
-        severity: "warning",
-        message: `Workflow ID "${workflow.workflowId}" should use letters, numbers, hyphens, or underscores.`,
-        path: workflowPath,
-      });
-    } else if (workflowIds.has(workflow.workflowId)) {
-      diagnostics.push({
-        severity: "error",
-        message: `Duplicate workflow ID "${workflow.workflowId}".`,
-        path: workflowPath,
-      });
+    } else {
+      if (!ID_PATTERN.test(workflow.workflowId)) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Workflow ID "${workflow.workflowId}" should use letters, numbers, hyphens, or underscores.`,
+          path: `${workflowPath}.workflowId`,
+        });
+      }
+      if (workflowIds.has(workflow.workflowId)) {
+        diagnostics.push({
+          severity: "error",
+          message: `Duplicate workflow ID "${workflow.workflowId}".`,
+          path: `${workflowPath}.workflowId`,
+        });
+      }
+      workflowIds.add(workflow.workflowId);
     }
-    workflowIds.add(workflow.workflowId);
 
     if (!Array.isArray(workflow.steps) || !workflow.steps.length) {
       diagnostics.push({
@@ -193,12 +204,13 @@ export function validateArazzo(spec: ArazzoSpec): Diagnostic[] {
     }
 
     const stepIds = new Set<string>();
-    for (const step of workflow.steps) {
+    for (const [stepIndex, step] of workflow.steps.entries()) {
+      const stepPath = `${workflowPath}.steps[${stepIndex}]`;
       if (!step.stepId) {
         diagnostics.push({
           severity: "error",
           message: `A step in "${workflow.workflowId}" is missing stepId.`,
-          path: `${workflowPath}.steps`,
+          path: stepPath,
         });
         continue;
       }
@@ -206,7 +218,7 @@ export function validateArazzo(spec: ArazzoSpec): Diagnostic[] {
         diagnostics.push({
           severity: "error",
           message: `Duplicate step ID "${step.stepId}" in "${workflow.workflowId}".`,
-          path: `${workflowPath}.steps.${step.stepId}`,
+          path: `${stepPath}.stepId`,
         });
       }
       stepIds.add(step.stepId);
@@ -218,18 +230,18 @@ export function validateArazzo(spec: ArazzoSpec): Diagnostic[] {
         diagnostics.push({
           severity: "error",
           message: `Step "${step.stepId}" must define exactly one of operationId, operationPath, or workflowId.`,
-          path: `${workflowPath}.steps.${step.stepId}`,
+          path: stepPath,
         });
       }
     }
 
-    for (const step of workflow.steps) {
+    for (const [stepIndex, step] of workflow.steps.entries()) {
       for (const action of [...(step.onSuccess ?? []), ...(step.onFailure ?? [])]) {
         if (action.type === "goto" && action.stepId && !stepIds.has(action.stepId)) {
           diagnostics.push({
             severity: "error",
             message: `Step "${step.stepId}" points to unknown step "${action.stepId}".`,
-            path: `${workflowPath}.steps.${step.stepId}`,
+            path: `${workflowPath}.steps[${stepIndex}]`,
           });
         }
       }
@@ -289,118 +301,6 @@ export function upsertSourceDescription(
   return document.toString({ lineWidth: 0 });
 }
 
-export function reorderWorkflowStep(
-  source: string,
-  workflowId: string,
-  stepId: string,
-  direction: -1 | 1,
-): string {
-  const document = parseDocument(source, {
-    prettyErrors: true,
-    keepSourceTokens: true,
-  });
-  if (document.errors.length) {
-    throw new Error("Fix YAML syntax errors before reordering steps.");
-  }
-
-  const steps = workflowStepsNode(document, workflowId);
-  const currentIndex = steps.items.findIndex(
-    (item) => isMap(item) && item.get("stepId") === stepId,
-  );
-  const targetIndex = currentIndex + direction;
-  if (
-    currentIndex < 0 ||
-    targetIndex < 0 ||
-    targetIndex >= steps.items.length
-  ) {
-    return source;
-  }
-
-  const [step] = steps.items.splice(currentIndex, 1);
-  steps.items.splice(targetIndex, 0, step);
-  return document.toString({ lineWidth: 0 });
-}
-
-export function materializeImplicitConnection(
-  source: string,
-  workflowId: string,
-  sourceStepId: string,
-  targetStepId: string,
-): string {
-  const document = parseDocument(source, {
-    prettyErrors: true,
-    keepSourceTokens: true,
-  });
-  if (document.errors.length) {
-    throw new Error("Fix YAML syntax errors before editing connections.");
-  }
-
-  const step = workflowStepNode(document, workflowId, sourceStepId);
-  step.set(
-    "onSuccess",
-    document.createNode([
-      {
-        name: `Continue to ${targetStepId}`,
-        type: "goto",
-        stepId: targetStepId,
-      },
-    ]),
-  );
-  return document.toString({ lineWidth: 0 });
-}
-
-export function updateWorkflowAction(
-  source: string,
-  workflowId: string,
-  stepId: string,
-  channel: "onSuccess" | "onFailure",
-  actionIndex: number,
-  patch: { name?: string; condition?: string },
-): string {
-  const document = parseDocument(source, {
-    prettyErrors: true,
-    keepSourceTokens: true,
-  });
-  if (document.errors.length) {
-    throw new Error("Fix YAML syntax errors before editing connections.");
-  }
-
-  const step = workflowStepNode(document, workflowId, stepId);
-  const actions = step.get(channel, true);
-  if (!isSeq(actions)) throw new Error(`The step has no ${channel} actions.`);
-  const action = actions.items[actionIndex];
-  if (!isMap(action)) throw new Error("The selected action could not be edited.");
-
-  if (patch.name !== undefined) action.set("name", patch.name);
-  if (patch.condition !== undefined) {
-    const criteria = action.get("criteria", true);
-    if (patch.condition.trim()) {
-      if (isSeq(criteria) && criteria.items.length) {
-        const firstCriterion = criteria.items[0];
-        if (isMap(firstCriterion)) {
-          firstCriterion.set("condition", patch.condition.trim());
-        } else {
-          criteria.items[0] = document.createNode({
-            condition: patch.condition.trim(),
-          });
-        }
-      } else {
-        action.set(
-          "criteria",
-          document.createNode([{ condition: patch.condition.trim() }]),
-        );
-      }
-    } else {
-      if (isSeq(criteria) && criteria.items.length > 1) {
-        criteria.items.splice(0, 1);
-      } else {
-        action.delete("criteria");
-      }
-    }
-  }
-  return document.toString({ lineWidth: 0 });
-}
-
 export function setWorkflowLayoutExtension(
   source: string,
   workflowId: string,
@@ -416,8 +316,10 @@ export function setWorkflowLayoutExtension(
 
   const workflow = workflowNode(document, workflowId);
   if (layout) {
-    workflow.set("x-loom-layout", document.createNode(layout));
+    workflow.set("x-arazzo-builder-layout", document.createNode(layout));
+    workflow.delete("x-loom-layout");
   } else {
+    workflow.delete("x-arazzo-builder-layout");
     workflow.delete("x-loom-layout");
   }
   return document.toString({ lineWidth: 0 });
@@ -512,69 +414,10 @@ function workflowStepNode(
   return step;
 }
 
-export function workflowToFlowchart(
-  workflow: ArazzoWorkflow,
-  direction: "LR" | "TB" = "LR",
-): string {
-  const lines = [
-    `flowchart ${direction}`,
-    "  classDef step fill:#ffffff,stroke:#5b68f6,color:#20204b,stroke-width:1.5px",
-    "  classDef endpoint fill:#e7e5ff,stroke:#8d84dc,color:#20204b,stroke-width:1.5px",
-    '  INPUT(["Inputs"]):::endpoint',
-  ];
-
-  for (const [index, step] of workflow.steps.entries()) {
-    const operation = step.operationId ?? step.operationPath ?? step.workflowId ?? "step";
-    lines.push(
-      `  ${safeId(step.stepId)}["${index + 1}. ${safeLabel(step.stepId)}<br/><small>${safeLabel(shortOperation(operation))}</small>"]:::step`,
-    );
-  }
-  lines.push('  OUTPUT(["Outputs"]):::endpoint');
-
-  if (workflow.steps.length) {
-    lines.push(`  INPUT --> ${safeId(workflow.steps[0].stepId)}`);
-  }
-
-  workflow.steps.forEach((step, index) => {
-    const explicitSuccess = (step.onSuccess ?? []).some(
-      (action) => action.type === "goto" || action.type === "end",
-    );
-    const next = workflow.steps[index + 1];
-    if (next && !explicitSuccess) {
-      lines.push(`  ${safeId(step.stepId)} --> ${safeId(next.stepId)}`);
-    }
-    for (const action of step.onSuccess ?? []) {
-      if (action.type === "goto" && action.stepId) {
-        lines.push(
-          `  ${safeId(step.stepId)} -->|"${safeLabel(action.name ?? "success")}"| ${safeId(action.stepId)}`,
-        );
-      } else if (action.type === "end") {
-        lines.push(`  ${safeId(step.stepId)} -->|"end"| OUTPUT`);
-      }
-    }
-    for (const action of step.onFailure ?? []) {
-      if (action.type === "goto" && action.stepId) {
-        lines.push(
-          `  ${safeId(step.stepId)} -.->|"${safeLabel(action.name ?? "failure")}"| ${safeId(action.stepId)}`,
-        );
-      }
-    }
-  });
-
-  const last = workflow.steps.at(-1);
-  const lastEnds = last?.onSuccess?.some((action) => action.type === "end");
-  if (last && !lastEnds) {
-    lines.push(`  ${safeId(last.stepId)} --> OUTPUT`);
-  }
-
-  return lines.join("\n");
-}
-
 export function workflowToSequence(
-  spec: ArazzoSpec,
+  _spec: ArazzoSpec,
   workflow: ArazzoWorkflow,
 ): string {
-  const sources = new Map(spec.sourceDescriptions.map((source) => [source.name, source]));
   const participants = new Set<string>();
   for (const step of workflow.steps) {
     participants.add(sourceForStep(step) || "API");
@@ -588,7 +431,6 @@ export function workflowToSequence(
 
   for (const step of workflow.steps) {
     const sourceName = sourceForStep(step) || "API";
-    const source = sources.get(sourceName);
     const target = safeId(sourceName);
     const operation = step.operationId ?? step.operationPath ?? step.workflowId ?? step.stepId;
     lines.push(`  User->>+${target}: ${safeLabel(shortOperation(operation))}`);
@@ -598,9 +440,6 @@ export function workflowToSequence(
       lines.push(
         `  Note right of User: ${safeLabel(Object.keys(step.outputs).join(", "))}`,
       );
-    }
-    if (source?.url) {
-      lines.push(`  %% ${source.url}`);
     }
   }
   return lines.join("\n");
@@ -629,6 +468,271 @@ function safeLabel(value: string): string {
     .replace(/\n/g, " ");
 }
 
-export type YamlDocument = Document<ParsedNode, true> & {
-  contents: Node;
-};
+function workspaceShapeDiagnostics(value: unknown): Diagnostic[] {
+  if (!isRecord(value)) {
+    return [
+      {
+        severity: "error",
+        message: "The document must contain a YAML object.",
+      },
+    ];
+  }
+
+  const diagnostics: Diagnostic[] = [];
+  if (typeof value.arazzo !== "string") {
+    diagnostics.push({
+      severity: "error",
+      message: "arazzo must be a string version.",
+      path: "arazzo",
+    });
+  }
+  if (
+    !isRecord(value.info) ||
+    typeof value.info.title !== "string" ||
+    typeof value.info.version !== "string" ||
+    !optionalStringFieldsAreValid(value.info, ["summary", "description"])
+  ) {
+    diagnostics.push({
+      severity: "error",
+      message: "info requires string title and version values.",
+      path: "info",
+    });
+  }
+  if (!Array.isArray(value.sourceDescriptions)) {
+    diagnostics.push({
+      severity: "error",
+      message: "sourceDescriptions must be a sequence.",
+      path: "sourceDescriptions",
+    });
+  } else {
+    value.sourceDescriptions.forEach((source, index) => {
+      if (
+        !isRecord(source) ||
+        typeof source.name !== "string" ||
+        typeof source.url !== "string" ||
+        (source.type !== undefined && typeof source.type !== "string")
+      ) {
+        diagnostics.push({
+          severity: "error",
+          message: "Every source description requires string name and url values.",
+          path: `sourceDescriptions[${index}]`,
+        });
+      }
+    });
+  }
+
+  if (!Array.isArray(value.workflows)) {
+    diagnostics.push({
+      severity: "error",
+      message: "workflows must be a sequence.",
+      path: "workflows",
+    });
+    return diagnostics;
+  }
+
+  value.workflows.forEach((workflow, workflowIndex) => {
+    const workflowPath = `workflows[${workflowIndex}]`;
+    if (!isRecord(workflow)) {
+      diagnostics.push({
+        severity: "error",
+        message: "Every workflow must be an object.",
+        path: workflowPath,
+      });
+      return;
+    }
+    if (typeof workflow.workflowId !== "string") {
+      diagnostics.push({
+        severity: "error",
+        message: "Every workflow requires a string workflowId.",
+        path: `${workflowPath}.workflowId`,
+      });
+    }
+    if (!optionalStringFieldsAreValid(workflow, [
+      "summary",
+      "description",
+    ])) {
+      diagnostics.push({
+        severity: "error",
+        message: "Workflow summary and description values must be strings.",
+        path: workflowPath,
+      });
+    }
+    if (
+      workflow.inputs !== undefined &&
+      (!isRecord(workflow.inputs) ||
+        (workflow.inputs.type !== undefined &&
+          typeof workflow.inputs.type !== "string") ||
+        (workflow.inputs.properties !== undefined &&
+          !isRecord(workflow.inputs.properties)) ||
+        (workflow.inputs.required !== undefined &&
+          (!Array.isArray(workflow.inputs.required) ||
+            !workflow.inputs.required.every(
+              (name: unknown) => typeof name === "string",
+            ))))
+    ) {
+      diagnostics.push({
+        severity: "error",
+        message: "Workflow inputs must use an object schema.",
+        path: `${workflowPath}.inputs`,
+      });
+    }
+    if (
+      workflow.outputs !== undefined &&
+      !isStringRecord(workflow.outputs)
+    ) {
+      diagnostics.push({
+        severity: "error",
+        message: "Workflow outputs must map names to string expressions.",
+        path: `${workflowPath}.outputs`,
+      });
+    }
+    if (!Array.isArray(workflow.steps)) {
+      diagnostics.push({
+        severity: "error",
+        message: "Workflow steps must be a sequence.",
+        path: `${workflowPath}.steps`,
+      });
+      return;
+    }
+
+    workflow.steps.forEach((step, stepIndex) => {
+      const stepPath = `${workflowPath}.steps[${stepIndex}]`;
+      if (!isRecord(step)) {
+        diagnostics.push({
+          severity: "error",
+          message: "Every workflow step must be an object.",
+          path: stepPath,
+        });
+        return;
+      }
+      if (typeof step.stepId !== "string") {
+        diagnostics.push({
+          severity: "error",
+          message: "Every workflow step requires a string stepId.",
+          path: `${stepPath}.stepId`,
+        });
+      }
+      if (
+        !optionalStringFieldsAreValid(step, [
+          "description",
+          "operationId",
+          "operationPath",
+          "workflowId",
+        ])
+      ) {
+        diagnostics.push({
+          severity: "error",
+          message: "Step descriptions and operation references must be strings.",
+          path: stepPath,
+        });
+      }
+      for (const field of [
+        "parameters",
+        "successCriteria",
+        "onSuccess",
+        "onFailure",
+      ]) {
+        if (
+          step[field] !== undefined &&
+          (!Array.isArray(step[field]) ||
+            !step[field].every((item: unknown) => isRecord(item)))
+        ) {
+          diagnostics.push({
+            severity: "error",
+            message: `${field} must be a sequence of objects.`,
+            path: `${stepPath}.${field}`,
+          });
+        }
+      }
+      if (
+        Array.isArray(step.parameters) &&
+        !step.parameters.every(
+          (parameter) =>
+            isRecord(parameter) &&
+            optionalStringFieldsAreValid(parameter, ["name", "in"]),
+        )
+      ) {
+        diagnostics.push({
+          severity: "error",
+          message: "Parameter names and locations must be strings.",
+          path: `${stepPath}.parameters`,
+        });
+      }
+      if (
+        Array.isArray(step.successCriteria) &&
+        !step.successCriteria.every(
+          (criterion) =>
+            isRecord(criterion) &&
+            optionalStringFieldsAreValid(criterion, ["condition"]),
+        )
+      ) {
+        diagnostics.push({
+          severity: "error",
+          message: "Success criteria conditions must be strings.",
+          path: `${stepPath}.successCriteria`,
+        });
+      }
+      for (const field of ["onSuccess", "onFailure"]) {
+        const actions = step[field];
+        if (
+          Array.isArray(actions) &&
+          !actions.every(
+            (action) =>
+              isRecord(action) &&
+              typeof action.type === "string" &&
+              optionalStringFieldsAreValid(action, [
+                "name",
+                "stepId",
+                "workflowId",
+              ]) &&
+              (action.criteria === undefined ||
+                (Array.isArray(action.criteria) &&
+                  action.criteria.every(
+                    (criterion) =>
+                      isRecord(criterion) &&
+                      optionalStringFieldsAreValid(criterion, ["condition"]),
+                  )))
+          )
+        ) {
+          diagnostics.push({
+            severity: "error",
+            message: `${field} actions must contain string action fields and criteria.`,
+            path: `${stepPath}.${field}`,
+          });
+        }
+      }
+      if (
+        step.outputs !== undefined &&
+        !isStringRecord(step.outputs)
+      ) {
+        diagnostics.push({
+          severity: "error",
+          message: "Step outputs must map names to string expressions.",
+          path: `${stepPath}.outputs`,
+        });
+      }
+    });
+  });
+
+  return diagnostics;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    isRecord(value) &&
+    Object.values(value).every((item) => typeof item === "string")
+  );
+}
+
+function optionalStringFieldsAreValid(
+  value: Record<string, unknown>,
+  fields: string[],
+): boolean {
+  return fields.every(
+    (field) => value[field] === undefined || typeof value[field] === "string",
+  );
+}

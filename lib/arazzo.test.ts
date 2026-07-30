@@ -5,13 +5,9 @@ import {
   findWorkflowStepAtOffset,
   findWorkflowStepRange,
   insertWorkflow,
-  materializeImplicitConnection,
   parseArazzo,
-  reorderWorkflowStep,
   setWorkflowLayoutExtension,
   upsertSourceDescription,
-  updateWorkflowAction,
-  workflowToFlowchart,
   workflowToSequence,
   type ArazzoWorkflow,
 } from "./arazzo";
@@ -51,13 +47,11 @@ describe("Arazzo document services", () => {
     expect(result.spec?.workflows[2].workflowId).toBe("list-time-off");
   });
 
-  it("generates both diagram formats from the same workflow", () => {
+  it("generates a sequence diagram from a workflow", () => {
     const result = parseArazzo(starter);
     const spec = result.spec!;
     const workflow = spec.workflows[0];
 
-    expect(workflowToFlowchart(workflow)).toContain("flowchart LR");
-    expect(workflowToFlowchart(workflow)).toContain("find_worker");
     expect(workflowToSequence(spec, workflow)).toContain("sequenceDiagram");
     expect(workflowToSequence(spec, workflow)).toContain("participant node_deel");
   });
@@ -94,6 +88,70 @@ describe("Arazzo document services", () => {
     ).toHaveLength(0);
   });
 
+  it("rejects document shapes that the workspace cannot render safely", () => {
+    const withoutWorkflows = parseArazzo(`
+arazzo: 1.0.1
+info: { title: Broken, version: 1.0.0 }
+sourceDescriptions: []
+`);
+    const scalarWorkflows = parseArazzo(`
+arazzo: 1.0.1
+info: { title: Broken, version: 1.0.0 }
+sourceDescriptions: []
+workflows: hello
+`);
+    const scalarSources = parseArazzo(`
+arazzo: 1.0.1
+info: { title: Broken, version: 1.0.0 }
+sourceDescriptions: hello
+workflows: []
+`);
+
+    expect(withoutWorkflows.spec).toBeNull();
+    expect(scalarWorkflows.spec).toBeNull();
+    expect(scalarSources.spec).toBeNull();
+    expect(
+      withoutWorkflows.diagnostics.some(
+        (diagnostic) => diagnostic.path === "workflows",
+      ),
+    ).toBe(true);
+    expect(
+      scalarSources.diagnostics.some(
+        (diagnostic) => diagnostic.path === "sourceDescriptions",
+      ),
+    ).toBe(true);
+  });
+
+  it("reports duplicate workflow IDs independently of ID format warnings", () => {
+    const result = parseArazzo(`
+arazzo: 1.0.1
+info: { title: Duplicate IDs, version: 1.0.0 }
+sourceDescriptions:
+  - name: api
+    url: /openapi.json
+workflows:
+  - workflowId: a.b
+    steps:
+      - stepId: first
+        operationId: $sourceDescriptions.api.first
+  - workflowId: a.b
+    steps:
+      - stepId: second
+        operationId: $sourceDescriptions.api.second
+`);
+
+    expect(
+      result.diagnostics.filter((diagnostic) =>
+        diagnostic.message.includes("should use letters"),
+      ),
+    ).toHaveLength(2);
+    expect(
+      result.diagnostics.some((diagnostic) =>
+        diagnostic.message.includes('Duplicate workflow ID "a.b"'),
+      ),
+    ).toBe(true);
+  });
+
   it("adds and updates named OpenAPI source descriptions", () => {
     const withPayments = upsertSourceDescription(starter, {
       name: "payments",
@@ -126,67 +184,6 @@ describe("Arazzo document services", () => {
     ]);
   });
 
-  it("reorders workflow steps while retaining their content", () => {
-    const next = reorderWorkflowStep(
-      starter,
-      "find-worker-contracts",
-      "load-contracts",
-      -1,
-    );
-    const workflow = parseArazzo(next).spec!.workflows[0];
-
-    expect(workflow.steps.map((step) => step.stepId)).toEqual([
-      "load-contracts",
-      "find-worker",
-    ]);
-    expect(workflow.steps[0].outputs).toEqual({
-      contracts: "$response.body#/data",
-    });
-  });
-
-  it("turns an implicit link into an editable success action", () => {
-    const explicit = materializeImplicitConnection(
-      starter,
-      "find-worker-contracts",
-      "find-worker",
-      "load-contracts",
-    );
-    const edited = updateWorkflowAction(
-      explicit,
-      "find-worker-contracts",
-      "find-worker",
-      "onSuccess",
-      0,
-      {
-        name: "Worker found",
-        condition: "$statusCode == 200",
-      },
-    );
-    const action = parseArazzo(edited).spec!.workflows[0].steps[0].onSuccess?.[0];
-
-    expect(action).toEqual({
-      name: "Worker found",
-      type: "goto",
-      stepId: "load-contracts",
-      criteria: [{ condition: "$statusCode == 200" }],
-    });
-  });
-
-  it("preserves YAML comments while serializing graph changes", () => {
-    const commented = starter.replace(
-      "    steps:\n",
-      "    # The execution order is intentional.\n    steps:\n",
-    );
-    const next = reorderWorkflowStep(
-      commented,
-      "find-worker-contracts",
-      "load-contracts",
-      -1,
-    );
-
-    expect(next).toContain("# The execution order is intentional.");
-  });
-
   it("adds and removes a portable workflow layout extension", () => {
     const embedded = setWorkflowLayoutExtension(
       starter,
@@ -200,7 +197,7 @@ describe("Arazzo document services", () => {
       },
     );
     expect(
-      parseArazzo(embedded).spec!.workflows[0]["x-loom-layout"],
+      parseArazzo(embedded).spec!.workflows[0]["x-arazzo-builder-layout"],
     ).toEqual({
       version: 1,
       nodes: {
@@ -215,7 +212,7 @@ describe("Arazzo document services", () => {
       null,
     );
     expect(
-      parseArazzo(removed).spec!.workflows[0]["x-loom-layout"],
+      parseArazzo(removed).spec!.workflows[0]["x-arazzo-builder-layout"],
     ).toBeUndefined();
   });
 
@@ -234,5 +231,15 @@ describe("Arazzo document services", () => {
       workflowId: "find-worker-contracts",
       stepId: "load-contracts",
     });
+  });
+
+  it("does not copy source URLs into generated Mermaid", () => {
+    const spec = parseArazzo(starter).spec!;
+    spec.sourceDescriptions[0].url =
+      "https://example.com/openapi.json\nparticipant Injected";
+
+    const sequence = workflowToSequence(spec, spec.workflows[0]);
+    expect(sequence).not.toContain("https://example.com");
+    expect(sequence).not.toContain("participant Injected");
   });
 });

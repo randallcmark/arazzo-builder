@@ -1,7 +1,6 @@
 "use client";
 
 import type { OnMount } from "@monaco-editor/react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -24,7 +23,13 @@ import {
   Share2,
   Undo2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { siteConfig } from "@/config/site";
 import {
   findWorkflowStepAtOffset,
@@ -34,20 +39,14 @@ import {
   setWorkflowLayoutExtension,
   upsertSourceDescription,
   workflowToSequence,
-  type ArazzoSpec,
   type ArazzoWorkflow,
 } from "@/lib/arazzo";
+import { loadCataloguesForSpec } from "@/lib/api-catalogues";
 import {
   buildCatalogue,
-  operationReferenceParts,
   parseOpenApiSource,
   type ApiCatalogue,
-  type OpenApiOperation,
 } from "@/lib/openapi";
-import {
-  decodeStoredWorkspace,
-  encodeStoredWorkspace,
-} from "@/lib/workspace-storage";
 import { workflowEdges } from "@/lib/workflow-graph";
 import {
   defaultWorkflowLayout,
@@ -61,17 +60,12 @@ import { DocumentationView } from "./DocumentationView";
 import { FlowView } from "./FlowView";
 import { MermaidView } from "./MermaidView";
 import { SelectionInspector } from "./SelectionInspector";
-
-const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
-  ssr: false,
-  loading: () => <div className="editor-loading">Preparing the YAML editor…</div>,
-});
+import { YamlWorkspacePanel } from "./YamlWorkspacePanel";
+import { useDocumentHistory } from "./useDocumentHistory";
+import { useWorkspaceDraft } from "./useWorkspaceDraft";
 
 type ViewMode = "flow" | "flowchart" | "sequence" | "docs" | "yaml";
 
-const DRAFT_KEY = siteConfig.draftStorageKey;
-const DEFAULT_DOCUMENT_URL = siteConfig.defaultDocumentUrl;
-const DEFAULT_DOCUMENT_NAME = siteConfig.defaultDocumentName;
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
 const viewOptions: Array<{
@@ -87,118 +81,51 @@ const viewOptions: Array<{
 ];
 
 export function Workspace() {
-  const [source, setSource] = useState("");
-  const [baseline, setBaseline] = useState("");
-  const [workspaceName, setWorkspaceName] = useState<string>(
-    DEFAULT_DOCUMENT_NAME,
-  );
-  const [catalogues, setCatalogues] = useState<ApiCatalogue[]>([]);
+  const {
+    source,
+    sourceRef,
+    replaceSource,
+    resetSource,
+    handleYamlChange,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useDocumentHistory();
+  const [status, setStatus] = useState("Loading published baseline…");
+  const {
+    baseline,
+    setBaseline,
+    workspaceName,
+    setWorkspaceName,
+    catalogues,
+    setCatalogues,
+  } = useWorkspaceDraft({
+    source,
+    resetSource,
+    onStatus: setStatus,
+  });
   const [view, setView] = useState<ViewMode>("flow");
   const [activeWorkflowId, setActiveWorkflowId] = useState("");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [apiSourceOpen, setApiSourceOpen] = useState(false);
-  const [status, setStatus] = useState("Loading published baseline…");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [activeApiName, setActiveApiName] = useState("");
   const [apiOperationQuery, setApiOperationQuery] = useState("");
-  const loaded = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const sourceRef = useRef("");
-  const undoStack = useRef<string[]>([]);
-  const redoStack = useRef<string[]>([]);
-  const yamlHistoryStart = useRef<string | null>(null);
-  const yamlHistoryTimer = useRef<number | null>(null);
   const yamlEditor = useRef<Parameters<OnMount>[0] | null>(null);
   const yamlDecorations = useRef<string[]>([]);
   const yamlCursorListener = useRef<{ dispose: () => void } | null>(null);
-  const [historyState, setHistoryState] = useState({
-    canUndo: false,
-    canRedo: false,
-  });
-
-  const syncHistoryState = () => {
-    setHistoryState({
-      canUndo:
-        undoStack.current.length > 0 || yamlHistoryStart.current !== null,
-      canRedo: redoStack.current.length > 0,
-    });
-  };
-
-  const clearYamlTimer = () => {
-    if (yamlHistoryTimer.current !== null) {
-      window.clearTimeout(yamlHistoryTimer.current);
-      yamlHistoryTimer.current = null;
-    }
-  };
-
-  const finalizeYamlHistory = () => {
-    clearYamlTimer();
-    const start = yamlHistoryStart.current;
-    yamlHistoryStart.current = null;
-    if (start === null || start === sourceRef.current) return;
-    undoStack.current.push(start);
-    if (undoStack.current.length > 100) undoStack.current.shift();
-    redoStack.current = [];
-    syncHistoryState();
-  };
-
-  const replaceSource = (nextSource: string, recordHistory = true) => {
-    finalizeYamlHistory();
-    const currentSource = sourceRef.current;
-    if (nextSource === currentSource) return;
-    if (recordHistory && currentSource) {
-      undoStack.current.push(currentSource);
-      if (undoStack.current.length > 100) undoStack.current.shift();
-      redoStack.current = [];
-    }
-    sourceRef.current = nextSource;
-    setSource(nextSource);
-    syncHistoryState();
-  };
-
-  const clearHistory = () => {
-    clearYamlTimer();
-    yamlHistoryStart.current = null;
-    undoStack.current = [];
-    redoStack.current = [];
-    syncHistoryState();
-  };
-
-  const handleYamlChange = (nextSource: string) => {
-    if (nextSource === sourceRef.current) return;
-    if (yamlHistoryStart.current === null) {
-      yamlHistoryStart.current = sourceRef.current;
-      syncHistoryState();
-    }
-    clearYamlTimer();
-    sourceRef.current = nextSource;
-    setSource(nextSource);
-    yamlHistoryTimer.current = window.setTimeout(finalizeYamlHistory, 750);
-  };
 
   const handleUndo = () => {
-    finalizeYamlHistory();
-    const previous = undoStack.current.pop();
-    if (previous === undefined) return;
-    redoStack.current.push(sourceRef.current);
-    sourceRef.current = previous;
-    setSource(previous);
-    syncHistoryState();
-    setStatus("Undid the last document change");
+    if (undo()) setStatus("Undid the last document change");
   };
 
   const handleRedo = () => {
-    finalizeYamlHistory();
-    const next = redoStack.current.pop();
-    if (next === undefined) return;
-    undoStack.current.push(sourceRef.current);
-    sourceRef.current = next;
-    setSource(next);
-    syncHistoryState();
-    setStatus("Redid the document change");
+    if (redo()) setStatus("Redid the document change");
   };
 
   const result = useMemo(() => parseArazzo(source), [source]);
@@ -228,85 +155,12 @@ export function Workspace() {
   const selectedEdge =
     graphEdges.find((edge) => edge.id === selectedEdgeId) ?? null;
   const embeddedLayout = workflow ? embeddedWorkflowLayout(workflow) : null;
-  const { canUndo, canRedo } = historyState;
-
-  useEffect(() => {
-    const load = async () => {
-      const documentResponse = await fetch(DEFAULT_DOCUMENT_URL);
-      if (!documentResponse.ok) {
-        throw new Error("The published workflow could not be loaded.");
-      }
-      const publishedSource = await documentResponse.text();
-      setBaseline(publishedSource);
-
-      const savedDraft = window.localStorage.getItem(DRAFT_KEY);
-      let initialSource = publishedSource;
-      let savedCatalogues: ApiCatalogue[] | undefined;
-      if (savedDraft) {
-        const savedWorkspace = decodeStoredWorkspace(savedDraft);
-        initialSource = savedWorkspace.source;
-        savedCatalogues = savedWorkspace.catalogues;
-        sourceRef.current = initialSource;
-        setSource(initialSource);
-        setBaseline(savedWorkspace.baseline);
-        setWorkspaceName(savedWorkspace.name);
-        setStatus("Local draft restored");
-      } else {
-        sourceRef.current = initialSource;
-        setSource(initialSource);
-        setStatus("Published baseline");
-      }
-      undoStack.current = [];
-      redoStack.current = [];
-      yamlHistoryStart.current = null;
-      setHistoryState({ canUndo: false, canRedo: false });
-
-      if (savedCatalogues?.length) {
-        setCatalogues(savedCatalogues);
-        setActiveApiName(savedCatalogues[0].sourceName);
-      } else {
-        const initialSpec = parseArazzo(initialSource).spec;
-        if (initialSpec) {
-          const loadedCatalogues = await loadCataloguesForSpec(initialSpec);
-          setCatalogues(loadedCatalogues);
-          setActiveApiName(loadedCatalogues[0]?.sourceName ?? "");
-        }
-      }
-      loaded.current = true;
-    };
-    load().catch((error) => {
-      setStatus(error instanceof Error ? error.message : "Unable to load workspace.");
-    });
-  }, []);
-
   useEffect(
     () => () => {
-      clearYamlTimer();
       yamlCursorListener.current?.dispose();
     },
     [],
   );
-
-  useEffect(() => {
-    if (!loaded.current || !source) return;
-    const timer = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(
-          DRAFT_KEY,
-          encodeStoredWorkspace({
-            source,
-            baseline,
-            name: workspaceName,
-            catalogues,
-          }),
-        );
-        setStatus(source === baseline ? "Workspace baseline" : "Draft saved locally");
-      } catch {
-        setStatus("This workspace is too large for browser-local draft storage");
-      }
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, [source, baseline, workspaceName, catalogues]);
 
   const handleReset = () => {
     if (!baseline) return;
@@ -338,9 +192,17 @@ export function Workspace() {
     setStatus("YAML downloaded");
   };
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(source);
-    setStatus("YAML copied to clipboard");
+  const copyText = async (value: string, successMessage: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setStatus(successMessage);
+    } catch {
+      setStatus("Clipboard access was denied. Use the YAML editor to copy instead.");
+    }
+  };
+
+  const handleCopy = () => {
+    void copyText(source, "YAML copied to clipboard");
   };
 
   const handleImport = async (file: File) => {
@@ -358,9 +220,7 @@ export function Workspace() {
         return;
       }
 
-      sourceRef.current = importedSource;
-      setSource(importedSource);
-      clearHistory();
+      resetSource(importedSource);
       setBaseline(importedSource);
       setWorkspaceName(safeDocumentName(file.name));
       setActiveWorkflowId(importedResult.spec.workflows?.[0]?.workflowId ?? "");
@@ -378,7 +238,7 @@ export function Workspace() {
       setCatalogues(loadedCatalogues);
       setActiveApiName(loadedCatalogues[0]?.sourceName ?? "");
       const loadedCatalogue = loadedCatalogues.some((catalogue) =>
-        catalogue.operations.some((operation) => operation.method !== "OP"),
+        catalogue.operations.some((operation) => operation.resolved),
       );
       setStatus(
         loadedCatalogue
@@ -565,6 +425,35 @@ export function Workspace() {
     );
   }, [source, selectedStepId, view, workflow]);
 
+  const selectView = (nextView: ViewMode) => {
+    setView(nextView);
+    if (nextView === "sequence") setSelectedEdgeId(null);
+  };
+
+  const handleViewTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentView: ViewMode,
+  ) => {
+    const currentIndex = viewOptions.findIndex(({ id }) => id === currentView);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % viewOptions.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + viewOptions.length) % viewOptions.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = viewOptions.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextView = viewOptions[nextIndex].id;
+    selectView(nextView);
+    window.requestAnimationFrame(() =>
+      document.getElementById(`workspace-tab-${nextView}`)?.focus(),
+    );
+  };
+
   return (
     <main
       className="workspace-shell"
@@ -733,12 +622,13 @@ export function Workspace() {
                 <button
                   role="tab"
                   aria-selected={view === id}
+                  aria-controls="workspace-view-panel"
+                  id={`workspace-tab-${id}`}
+                  tabIndex={view === id ? 0 : -1}
                   className={view === id ? "is-active" : ""}
                   key={id}
-                  onClick={() => {
-                    setView(id);
-                    if (id === "sequence") setSelectedEdgeId(null);
-                  }}
+                  onClick={() => selectView(id)}
+                  onKeyDown={(event) => handleViewTabKeyDown(event, id)}
                 >
                   <Icon size={15} />
                   {label}
@@ -773,8 +663,8 @@ export function Workspace() {
                     onClick={handleToggleEmbeddedLayout}
                     title={
                       embeddedLayout
-                        ? "Remove x-loom-layout from this workflow"
-                        : "Embed the current Flow arrangement as x-loom-layout"
+                        ? "Remove x-arazzo-builder-layout from this workflow"
+                        : "Embed the current Flow arrangement as x-arazzo-builder-layout"
                     }
                   >
                     <Save size={13} />
@@ -789,7 +679,12 @@ export function Workspace() {
             </div>
           </div>
 
-          <div className={`workspace-canvas workspace-canvas--${view}`}>
+          <div
+            className={`workspace-canvas workspace-canvas--${view}`}
+            id="workspace-view-panel"
+            role="tabpanel"
+            aria-labelledby={`workspace-tab-${view}`}
+          >
             {!source ? (
               <div className="workspace-empty">
                 <div className="loading-weave">
@@ -799,6 +694,21 @@ export function Workspace() {
                 </div>
                 <p>Loading the published workflow…</p>
               </div>
+            ) : view === "yaml" ? (
+              <YamlWorkspacePanel
+                source={source}
+                onMount={handleYamlMount}
+                onChange={handleYamlChange}
+                catalogues={catalogues}
+                activeCatalogue={activeCatalogue}
+                onActiveCatalogueChange={setActiveApiName}
+                operationQuery={apiOperationQuery}
+                onOperationQueryChange={setApiOperationQuery}
+                diagnostics={result.diagnostics}
+                onCopyReference={(reference) =>
+                  void copyText(reference, `Copied ${reference}`)
+                }
+              />
             ) : !spec || !workflow ? (
               <div className="workspace-empty workspace-empty--error">
                 <AlertCircle size={30} />
@@ -866,115 +776,7 @@ export function Workspace() {
                 workflow={workflow}
                 sources={spec.sourceDescriptions}
               />
-            ) : (
-              <div className="yaml-workspace">
-                <MonacoEditor
-                  height="100%"
-                  defaultLanguage="yaml"
-                  value={source}
-                  onMount={handleYamlMount}
-                  onChange={(value) => handleYamlChange(value ?? "")}
-                  theme="vs"
-                  options={{
-                    minimap: { enabled: false },
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 13,
-                    lineHeight: 21,
-                    padding: { top: 18, bottom: 18 },
-                    scrollBeyondLastLine: false,
-                    wordWrap: "on",
-                    renderLineHighlight: "gutter",
-                    overviewRulerLanes: 0,
-                    folding: true,
-                    automaticLayout: true,
-                  }}
-                />
-                <aside className="diagnostics-panel">
-                  {activeCatalogue && (
-                    <section className="api-reference-browser">
-                      <header>
-                        <span>API references</span>
-                        <strong>{activeCatalogue.operations.length}</strong>
-                      </header>
-                      <label>
-                        <span>Source</span>
-                        <select
-                          value={activeCatalogue.sourceName}
-                          onChange={(event) =>
-                            setActiveApiName(event.target.value)
-                          }
-                        >
-                          {catalogues.map((catalogue) => (
-                            <option
-                              key={catalogue.sourceName}
-                              value={catalogue.sourceName}
-                            >
-                              {catalogue.sourceName} · {catalogue.title}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span>Find operation</span>
-                        <input
-                          value={apiOperationQuery}
-                          onChange={(event) =>
-                            setApiOperationQuery(event.target.value)
-                          }
-                          placeholder="operationId, path, or method"
-                        />
-                      </label>
-                      <div className="api-reference-list">
-                        {activeCatalogue.operations
-                          .filter((operation) =>
-                            operationMatches(operation, apiOperationQuery),
-                          )
-                          .slice(0, 180)
-                          .map((operation) => {
-                          const reference = `$sourceDescriptions.${activeCatalogue.sourceName}.${operation.id}`;
-                          return (
-                            <button
-                              key={operation.id}
-                              title={`Copy ${reference}`}
-                              onClick={() => {
-                                void navigator.clipboard.writeText(reference);
-                                setStatus(`Copied ${reference}`);
-                              }}
-                            >
-                              <span>
-                                <b>{operation.method}</b>
-                                {operation.path}
-                              </span>
-                              <code>{operation.id}</code>
-                            </button>
-                          );
-                          })}
-                      </div>
-                    </section>
-                  )}
-                  <header>
-                    <span>Diagnostics</span>
-                    <strong>{result.diagnostics.length}</strong>
-                  </header>
-                  {result.diagnostics.length ? (
-                    result.diagnostics.map((diagnostic, index) => (
-                      <div className="diagnostic" key={`${diagnostic.message}-${index}`}>
-                        <AlertCircle size={14} />
-                        <p>
-                          {diagnostic.message}
-                          {diagnostic.path && <code>{diagnostic.path}</code>}
-                        </p>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="diagnostic diagnostic--success">
-                      <Check size={14} />
-                      <p>No structural issues found.</p>
-                    </div>
-                  )}
-                </aside>
-              </div>
-            )}
+            ) : null}
           </div>
         </section>
 
@@ -1032,84 +834,4 @@ function safeDocumentName(name: string): string {
 
 function hasFiles(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types).includes("Files");
-}
-
-async function loadCataloguesForSpec(
-  spec: ArazzoSpec,
-): Promise<ApiCatalogue[]> {
-  return Promise.all(
-    (spec.sourceDescriptions ?? []).map(async (sourceDescription) => {
-      const fallback = importedOperations(spec, sourceDescription.name);
-      try {
-        const response = await fetch(
-          new URL(sourceDescription.url, window.location.href),
-        );
-        if (!response.ok) throw new Error("Source response was not successful.");
-        const document = parseOpenApiSource(await response.text());
-        const loaded = buildCatalogue(
-          document,
-          sourceDescription.name,
-          sourceDescription.url,
-        );
-        return {
-          ...loaded,
-          operations: mergeOperations(loaded.operations, fallback),
-        };
-      } catch {
-        return {
-          sourceName: sourceDescription.name,
-          title: sourceDescription.name,
-          location: sourceDescription.url,
-          operations: fallback,
-        };
-      }
-    }),
-  );
-}
-
-function importedOperations(
-  spec: ArazzoSpec,
-  sourceName: string,
-): OpenApiOperation[] {
-  const ids = new Set<string>();
-  for (const workflow of spec.workflows ?? []) {
-    for (const step of workflow.steps ?? []) {
-      const reference = operationReferenceParts(step.operationId);
-      if (!reference || reference.sourceName !== sourceName) continue;
-      ids.add(reference.operationId);
-    }
-  }
-
-  return Array.from(ids, (id) => ({
-    id,
-    method: "OP",
-    path: "Referenced by imported Arazzo",
-    summary: id,
-    sourceName,
-    sourceTitle: sourceName,
-  }));
-}
-
-function mergeOperations(
-  primary: OpenApiOperation[],
-  fallback: OpenApiOperation[],
-): OpenApiOperation[] {
-  const merged = new Map(primary.map((operation) => [operation.id, operation]));
-  for (const operation of fallback) {
-    if (!merged.has(operation.id)) merged.set(operation.id, operation);
-  }
-  return Array.from(merged.values()).sort((a, b) =>
-    a.summary.localeCompare(b.summary),
-  );
-}
-
-function operationMatches(
-  operation: OpenApiOperation,
-  query: string,
-): boolean {
-  const cleanQuery = query.trim().toLowerCase();
-  if (!cleanQuery) return true;
-  return [operation.id, operation.method, operation.path, operation.summary].some(
-    (value) => value.toLowerCase().includes(cleanQuery),
-  );
 }

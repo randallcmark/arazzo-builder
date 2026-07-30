@@ -1,8 +1,9 @@
 "use client";
 
 import { FileUp, Link2, LoaderCircle, Plus, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import type { ApiCatalogue } from "@/lib/openapi";
+import { useDialogFocus } from "./useDialogFocus";
 
 export function ApiSourceDialog({
   open,
@@ -25,8 +26,36 @@ export function ApiSourceDialog({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>(open, onClose);
 
   if (!open) return null;
+
+  const selectMode = (nextMode: "url" | "file") => {
+    setMode(nextMode);
+    setError("");
+  };
+
+  const handleModeKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentMode: "url" | "file",
+  ) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const nextMode =
+      event.key === "Home"
+        ? "url"
+        : event.key === "End"
+          ? "file"
+          : currentMode === "url"
+            ? "file"
+            : "url";
+    selectMode(nextMode);
+    window.requestAnimationFrame(() =>
+      document.getElementById(`api-source-tab-${nextMode}`)?.focus(),
+    );
+  };
 
   const submit = async () => {
     const cleanName = name.trim();
@@ -71,10 +100,12 @@ export function ApiSourceDialog({
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         className="workflow-dialog api-source-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="api-source-dialog-title"
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
@@ -117,11 +148,12 @@ export function ApiSourceDialog({
               <button
                 role="tab"
                 aria-selected={mode === "url"}
+                aria-controls="api-source-mode-panel"
+                id="api-source-tab-url"
+                tabIndex={mode === "url" ? 0 : -1}
                 className={mode === "url" ? "is-active" : ""}
-                onClick={() => {
-                  setMode("url");
-                  setError("");
-                }}
+                onClick={() => selectMode("url")}
+                onKeyDown={(event) => handleModeKeyDown(event, "url")}
               >
                 <Link2 size={15} />
                 From URL
@@ -129,18 +161,24 @@ export function ApiSourceDialog({
               <button
                 role="tab"
                 aria-selected={mode === "file"}
+                aria-controls="api-source-mode-panel"
+                id="api-source-tab-file"
+                tabIndex={mode === "file" ? 0 : -1}
                 className={mode === "file" ? "is-active" : ""}
-                onClick={() => {
-                  setMode("file");
-                  setError("");
-                }}
+                onClick={() => selectMode("file")}
+                onKeyDown={(event) => handleModeKeyDown(event, "file")}
               >
                 <FileUp size={15} />
                 From file
               </button>
             </div>
 
-            <div className="source-loader-fields">
+            <div
+              className="source-loader-fields"
+              id="api-source-mode-panel"
+              role="tabpanel"
+              aria-labelledby={`api-source-tab-${mode}`}
+            >
               <label className="builder-field">
                 <span>Arazzo source name</span>
                 <input

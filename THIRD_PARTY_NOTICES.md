@@ -1,6 +1,6 @@
 # Third-party notices
 
-Arazzo Loom is independently implemented and does not copy source from
+Arazzo Builder is independently implemented and does not copy source from
 `connEthics/arazzo-demo`.
 
 The application uses the following permissively licensed packages:
@@ -22,6 +22,9 @@ The development toolchain also uses:
 - TypeScript — Apache License 2.0
 - ESLint and `eslint-config-next` — MIT
 - Vitest — MIT
+- Testing Library (`@testing-library/react` and
+  `@testing-library/user-event`) — MIT
+- jsdom — MIT
 - TypeScript definitions from DefinitelyTyped — MIT
 
 Exact versions are recorded in `package-lock.json`. Copyright and license texts

@@ -1,0 +1,218 @@
+// @vitest-environment jsdom
+
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { siteConfig } from "@/config/site";
+import { encodeStoredWorkspace } from "@/lib/workspace-storage";
+import { Workspace } from "./Workspace";
+
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function MockMonacoEditor({
+      value,
+      onChange,
+    }: {
+      value: string;
+      onChange: (value: string) => void;
+    }) {
+      return (
+        <textarea
+          aria-label="YAML source editor"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      );
+    },
+}));
+
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    href,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={String(href)} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock("./FlowView", () => ({
+  FlowView: () => <div data-testid="flow-view">Flow projection</div>,
+}));
+vi.mock("./MermaidView", () => ({
+  MermaidView: () => <div>Sequence projection</div>,
+}));
+vi.mock("./DocumentationView", () => ({
+  DocumentationView: () => <div>Documentation projection</div>,
+}));
+vi.mock("./SelectionInspector", () => ({
+  SelectionInspector: () => null,
+}));
+vi.mock("./AddWorkflowDialog", () => ({
+  AddWorkflowDialog: () => null,
+}));
+vi.mock("./ApiSourceDialog", () => ({
+  ApiSourceDialog: () => null,
+}));
+
+const publishedSource = readFileSync(
+  resolve(process.cwd(), "public/workflows/deel-arazzo.yml"),
+  "utf8",
+);
+
+const malformedSource = `
+arazzo: 1.0.1
+info: { title: Needs repair, version: 1.0.0 }
+sourceDescriptions: []
+workflows: hello
+`;
+
+function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => Array.from(values.keys())[index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, String(value)),
+  };
+}
+
+describe("Workspace recovery", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: createMemoryStorage(),
+    });
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      siteConfig.draftStorageKey,
+      encodeStoredWorkspace({
+        source: malformedSource,
+        baseline: publishedSource,
+        name: "broken-arazzo.yml",
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        text: async () => publishedSource,
+      })),
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens the YAML editor and recovers from an invalid saved document", async () => {
+    const user = userEvent.setup();
+    render(<Workspace />);
+
+    expect(
+      await screen.findByRole("heading", { name: "The YAML needs attention" }),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Open YAML" }));
+    const editor = screen.getByRole("textbox", { name: "YAML source editor" });
+    expect((editor as HTMLTextAreaElement).value).toBe(malformedSource);
+
+    fireEvent.change(editor, { target: { value: publishedSource } });
+    await user.click(screen.getByRole("tab", { name: "Flow" }));
+
+    expect(await screen.findByTestId("flow-view")).toBeTruthy();
+  });
+
+  it("reports clipboard rejection without claiming the copy succeeded", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockRejectedValue(new Error("Permission denied")),
+      },
+    });
+    render(<Workspace />);
+
+    await screen.findByRole("heading", { name: "The YAML needs attention" });
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+
+    expect(
+      await screen.findByText(
+        "Clipboard access was denied. Use the YAML editor to copy instead.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("YAML copied to clipboard")).toBeNull();
+  });
+
+  it("imports a valid Arazzo file without fetching its cross-origin source", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Workspace />);
+    await screen.findByRole("heading", { name: "The YAML needs attention" });
+    const fileInput = container.querySelector<HTMLInputElement>(
+      "input[type='file']",
+    );
+    const imported = new File(
+      [
+        JSON.stringify({
+          arazzo: "1.0.1",
+          info: { title: "Imported", version: "1.0.0" },
+          sourceDescriptions: [
+            {
+              name: "payments",
+              url: "https://api.example/openapi.json",
+              type: "openapi",
+            },
+          ],
+          workflows: [
+            {
+              workflowId: "pay",
+              steps: [
+                {
+                  stepId: "create",
+                  operationId:
+                    "$sourceDescriptions.payments.createPayment",
+                },
+              ],
+            },
+          ],
+        }),
+      ],
+      "imported-arazzo.json",
+      { type: "application/json" },
+    );
+
+    expect(fileInput).toBeTruthy();
+    await user.upload(fileInput!, imported);
+
+    expect(await screen.findByTestId("flow-view")).toBeTruthy();
+    expect(screen.getByText("imported-arazzo.json")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores drafts from the legacy storage key during the rename", async () => {
+    window.localStorage.removeItem(siteConfig.draftStorageKey);
+    window.localStorage.setItem(
+      siteConfig.legacyDraftStorageKeys[0],
+      encodeStoredWorkspace({
+        source: malformedSource,
+        baseline: publishedSource,
+        name: "legacy-draft.yml",
+      }),
+    );
+    render(<Workspace />);
+
+    expect(
+      await screen.findByRole("heading", { name: "The YAML needs attention" }),
+    ).toBeTruthy();
+    expect(screen.getByText("legacy-draft.yml")).toBeTruthy();
+  });
+});
