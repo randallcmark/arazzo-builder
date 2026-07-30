@@ -1,0 +1,49 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Deel API starter operation catalogue",
+    "version": "2026-01-01",
+    "description": "A compact local catalogue for the Arazzo Loom starter. Replace with the generator's source OpenAPI document."
+  },
+  "servers": [
+    {
+      "url": "https://api.letsdeel.com"
+    }
+  ],
+  "paths": {
+    "/rest/people": {
+      "get": {
+        "operationId": "getPeople",
+        "summary": "List people"
+      }
+    },
+    "/rest/contracts": {
+      "get": {
+        "operationId": "getContracts",
+        "summary": "List contracts"
+      },
+      "post": {
+        "operationId": "createContract",
+        "summary": "Create a contractor contract"
+      }
+    },
+    "/rest/contracts/{contract_id}": {
+      "get": {
+        "operationId": "getContract",
+        "summary": "Get a contract"
+      }
+    },
+    "/rest/time-offs": {
+      "get": {
+        "operationId": "getTimeOffs",
+        "summary": "List time off"
+      }
+    },
+    "/rest/groups": {
+      "post": {
+        "operationId": "createGroup",
+        "summary": "Create a group"
+      }
+    }
+  }
+}

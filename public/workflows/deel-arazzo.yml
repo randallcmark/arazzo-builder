@@ -1,0 +1,102 @@
+arazzo: 1.0.1
+info:
+  title: Deel API workflow collection
+  summary: Practical journeys across the public Deel API
+  description: |
+    A local-first collection of workflows used to explore and extend the Deel
+    OpenAPI description. Replace this starter document with the output of the
+    repository generator when it is available.
+  version: 0.1.0
+sourceDescriptions:
+  - name: deel
+    type: openapi
+    url: /openapi/deel-openapi.json
+workflows:
+  - workflowId: find-worker-contracts
+    summary: Find a worker and their contracts
+    description: Locate a person by email and load the contracts associated with them.
+    inputs:
+      type: object
+      properties:
+        worker_email:
+          type: string
+          format: email
+          description: Work or personal email address
+      required:
+        - worker_email
+    steps:
+      - stepId: find-worker
+        description: Search the organisation people directory using the supplied email.
+        operationId: $sourceDescriptions.deel.getPeople
+        parameters:
+          - name: search
+            in: query
+            value: $inputs.worker_email
+          - name: limit
+            in: query
+            value: 1
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          worker_id: $response.body#/data/0/id
+      - stepId: load-contracts
+        description: Retrieve contracts visible to the authenticated organisation.
+        operationId: $sourceDescriptions.deel.getContracts
+        parameters:
+          - name: limit
+            in: query
+            value: 50
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          contracts: $response.body#/data
+    outputs:
+      worker_id: $steps.find-worker.outputs.worker_id
+      active_contracts: $steps.load-contracts.outputs.contracts
+  - workflowId: create-and-check-contract
+    summary: Create a contractor contract and check its state
+    description: Create a draft contract and retrieve the newly created record.
+    inputs:
+      type: object
+      properties:
+        title:
+          type: string
+        country_code:
+          type: string
+        worker_email:
+          type: string
+          format: email
+      required:
+        - title
+        - country_code
+        - worker_email
+    steps:
+      - stepId: create-contract
+        description: Create a draft ongoing contractor agreement.
+        operationId: $sourceDescriptions.deel.createContract
+        requestBody:
+          contentType: application/json
+          payload:
+            data:
+              title: $inputs.title
+              type: ongoing_time_based
+              country_code: $inputs.country_code
+              worker:
+                expected_email: $inputs.worker_email
+        successCriteria:
+          - condition: $statusCode == 201
+        outputs:
+          contract_id: $response.body#/data/id
+      - stepId: check-contract
+        description: Load the contract returned by the creation request.
+        operationId: $sourceDescriptions.deel.getContract
+        parameters:
+          - name: contract_id
+            in: path
+            value: $steps.create-contract.outputs.contract_id
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          contract: $response.body#/data
+    outputs:
+      contract: $steps.check-contract.outputs.contract
