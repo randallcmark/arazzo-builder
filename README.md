@@ -64,7 +64,8 @@ npm run check
 
 GitHub Actions runs the same locked install and validation command for pushes
 to `main` and for pull requests. The install fails when a dependency introduces
-an unreviewed lifecycle script.
+an unreviewed lifecycle script. New dependency resolution also enforces a
+two-day minimum package age; see `docs/development.md` for the update policy.
 
 ## Customize a fork
 

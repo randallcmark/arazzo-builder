@@ -44,6 +44,10 @@ patched dependency path.
 Dependency lifecycle scripts are governed by npm's native, strict
 `allowScripts` policy. The required npm version is declared in `package.json`;
 older npm clients are not supported because they do not enforce this control.
+New dependency resolution also applies the two-day minimum release age declared
+in `.npmrc`. Security fixes that have not yet aged into that window require a
+documented, package-specific target-environment exception rather than a
+downgrade to a vulnerable release.
 
 ## Supported version
 

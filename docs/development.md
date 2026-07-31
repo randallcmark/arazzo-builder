@@ -52,20 +52,31 @@ tooling advisories separately from shipped runtime dependencies.
 
 ## Security-pinned transitive dependencies
 
-`package.json` temporarily overrides three transitive packages:
+`package.json` temporarily overrides several transitive packages:
 
 - DOMPurify 3.4.12 for Monaco Editor.
-- PostCSS 8.5.25 for Next.js.
+- PostCSS 8.5.24 for Next.js and Vite.
 - Sharp 0.35.3 for Next.js.
+- Baseline Browser Mapping 2.11.6 for Next.js and Browserslist.
+- Flatted 3.4.3 for ESLint.
+- The compatible `brace-expansion` branches used by Minimatch 3 and 10.
 
-These versions address advisories affecting the versions declared by the
-current upstream packages. The application does not use `next/image`, so Sharp
-is not exercised by application behavior, but retaining a patched optional
-version keeps the installed production tree clean.
+The DOMPurify, PostCSS, and Sharp versions address advisories affecting the
+versions declared by the current upstream packages. The other overrides keep
+lockfile regeneration within the repository's package-age policy. The
+application does not use `next/image`, so Sharp is not exercised by application
+behavior, but retaining a patched optional version keeps the installed
+production tree clean.
 
-Reassess and remove each override when Monaco Editor and Next.js declare
-patched compatible ranges themselves. Any override change requires
-`npm run check` and both production-only and full dependency audits.
+Vite 7.3.6 is an explicit development dependency because Vitest's broad
+optional peer range would otherwise select the newly published Vite 8 and
+Rolldown line. Lucide React 1.27.0 is pinned directly, and
+`@napi-rs/wasm-runtime` 1.1.6 is pinned as a development dependency so npm
+deduplicates the compatible optional resolver runtime.
+
+Reassess and remove each compatibility pin when its upstream dependency range
+can resolve safely without it. Any dependency change requires `npm run check`
+and both production-only and full dependency audits.
 
 The full development tree may continue to report the `brace-expansion`
 denial-of-service advisory through ESLint 9 plugins that depend on Minimatch 3.
@@ -76,13 +87,34 @@ through ESLint 9; upgrade that toolchain together when its peer ranges permit.
 This repository requires npm 11.16 or newer and enables
 `strict-allow-scripts=true` in `.npmrc`. The native npm `allowScripts` policy
 therefore blocks an install when a dependency has an unreviewed lifecycle
-script. Only the exact installed versions of `fsevents` and `unrs-resolver` are
-approved. Review and re-approve them when either pinned version changes; do not
-replace the policy with a blanket script allowance.
+script. Only the exact installed versions of Esbuild, `fsevents`, and
+`unrs-resolver` are approved. Review and re-approve them when a pinned version
+changes; do not replace the policy with a blanket script allowance.
 
 Use the package-manager version declared in `package.json`. Older npm clients
 do not implement this policy and are rejected by the repository's engine
 requirements.
+
+## Dependency release-age policy
+
+`.npmrc` sets `min-release-age=2`, so npm resolves only package versions that
+have been public for more than two days. This mirrors the default 48-hour
+minimum enforced by Aikido Endpoint Protection and prevents a routine lockfile
+refresh from selecting a version that the target environment will immediately
+block.
+
+`npm ci` continues to install the committed lockfile exactly. When changing a
+dependency:
+
+1. Use the reviewed npm version declared in `package.json`.
+2. Run `npm install`; do not bypass the minimum-age setting.
+3. Inspect the direct and transitive lockfile changes.
+4. Run `npm ci`, `npm run check`, `npm audit --omit=dev`, and `npm audit`.
+
+If an urgent security fix is less than two days old, do not downgrade to a
+known-vulnerable release. Record the advisory and request a narrow,
+time-limited package exception in the target environment, then remove the
+exception after the release has aged into policy.
 
 Tests live beside the modules they exercise. Library behavior uses the default
 Vitest Node environment; React interaction tests opt into jsdom. New mutation

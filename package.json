@@ -14,11 +14,19 @@
     "npm": ">=11.16.0"
   },
   "overrides": {
+    "baseline-browser-mapping": "2.11.6",
     "dompurify": "3.4.12",
+    "flatted": "3.4.3",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.16"
+    },
+    "minimatch@10.2.6": {
+      "brace-expansion": "5.0.8"
+    },
     "next": {
-      "postcss": "8.5.25",
       "sharp": "0.35.3"
-    }
+    },
+    "postcss": "8.5.24"
   },
   "scripts": {
     "dev": "next dev",
@@ -31,7 +39,7 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@xyflow/react": "^12.11.2",
-    "lucide-react": "^1.28.0",
+    "lucide-react": "1.27.0",
     "mermaid": "^11.16.0",
     "monaco-editor": "0.56.0",
     "next": "^16.2.12",
@@ -40,6 +48,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@napi-rs/wasm-runtime": "1.1.6",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22.10.2",
@@ -49,9 +58,11 @@
     "eslint-config-next": "^16.2.12",
     "jsdom": "^30.0.1",
     "typescript": "^5.7.2",
+    "vite": "7.3.6",
     "vitest": "^4.1.10"
   },
   "allowScripts": {
+    "esbuild@0.28.1": true,
     "fsevents@2.3.3": true,
     "unrs-resolver@1.12.2": true
   }

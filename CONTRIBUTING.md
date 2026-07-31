@@ -21,7 +21,8 @@ npm run check
 ```
 
 Dependency lifecycle scripts are denied unless their exact package version is
-approved in `package.json`. Do not add a broad install-script allowance.
+approved in `package.json`. Do not add a broad install-script allowance or
+bypass the two-day minimum package age in `.npmrc`.
 
 ## Pull requests
 
