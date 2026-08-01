@@ -4,6 +4,7 @@
 # Next.js output
 /.next
 /out
+tsconfig.tsbuildinfo
 
 # test output
 /coverage

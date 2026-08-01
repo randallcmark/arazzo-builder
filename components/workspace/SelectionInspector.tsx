@@ -5,9 +5,15 @@ import {
   Braces,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
+  Copy,
   GitBranch,
+  MousePointer2,
+  X,
 } from "lucide-react";
-import type { ArazzoAction, ArazzoStep, ArazzoWorkflow } from "@/lib/arazzo";
+import { useState } from "react";
+import type { ArazzoAction, ArazzoWorkflow } from "@/lib/arazzo";
+import { findWorkflowStepRange } from "@/lib/arazzo";
 import { resolveStepOperation, type ApiCatalogue } from "@/lib/openapi";
 import {
   bindingsFromStep,
@@ -18,25 +24,44 @@ import {
 import type { WorkflowEdge } from "@/lib/workflow-graph";
 import { OpenApiOperationInspector } from "./OpenApiOperationInspector";
 
+type StepInspectorTab = "contract" | "data" | "controlFlow" | "yaml";
+
+const stepTabs: Array<{ id: StepInspectorTab; label: string }> = [
+  { id: "contract", label: "Contract" },
+  { id: "data", label: "Data" },
+  { id: "controlFlow", label: "Control flow" },
+  { id: "yaml", label: "YAML" },
+];
+
 export function SelectionInspector({
   workflow,
+  source,
   selectedStepId,
   selectedEdge,
   catalogues,
+  onSelectStep,
+  onCopy,
   onClose,
 }: {
   workflow: ArazzoWorkflow;
+  source: string;
   selectedStepId: string | null;
   selectedEdge: WorkflowEdge | null;
   catalogues: ApiCatalogue[];
+  onSelectStep: (stepId: string) => void;
+  onCopy: (value: string, message: string) => void;
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<StepInspectorTab>("contract");
   const step = workflow.steps.find(
     (candidate) => candidate.stepId === selectedStepId,
   );
 
   if (step) {
     const stepIndex = workflow.steps.indexOf(step);
+    const previousStep = stepIndex > 0 ? workflow.steps[stepIndex - 1] : null;
+    const nextStep =
+      stepIndex < workflow.steps.length - 1 ? workflow.steps[stepIndex + 1] : null;
     const operationDetails = resolveStepOperation(
       step.operationId,
       step.operationPath,
@@ -49,87 +74,163 @@ export function SelectionInspector({
         target: binding.target,
       })),
     );
+    const yamlRange = findWorkflowStepRange(source, workflow.workflowId, step.stepId);
+    const yamlSnippet = yamlRange ? source.slice(yamlRange.start, yamlRange.end) : null;
+
     return (
       <aside className="step-inspector">
         <InspectorHeader
-          eyebrow="Selected step"
+          eyebrow={`Step ${String(stepIndex + 1).padStart(2, "0")} of ${String(
+            workflow.steps.length,
+          ).padStart(2, "0")}`}
           title={step.stepId}
           onClose={onClose}
+          stepNav={{
+            onPrevious: () => previousStep && onSelectStep(previousStep.stepId),
+            onNext: () => nextStep && onSelectStep(nextStep.stepId),
+            canPrevious: Boolean(previousStep),
+            canNext: Boolean(nextStep),
+          }}
         />
+        <div className="inspector-tabs" role="tablist" aria-label="Step detail">
+          {stepTabs.map(({ id, label }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              className={tab === id ? "is-active" : ""}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="inspector-body">
-          <section className="inspector-overview">
-            <span>Workflow position</span>
-            <div className="inspector-position">
-              <strong>{String(stepIndex + 1).padStart(2, "0")}</strong>
-              <p>
-                of {String(workflow.steps.length).padStart(2, "0")} calls in
-                <br />
-                {workflow.workflowId}
-              </p>
-            </div>
-            {step.description && <p>{step.description}</p>}
-          </section>
-
-          {operationDetails ? (
-            <OpenApiOperationInspector
-              catalogue={operationDetails.catalogue}
-              operation={operationDetails.operation}
-            />
-          ) : (
-            <section>
-              <span>Operation target</span>
-              <code>{step.operationId ?? step.operationPath ?? step.workflowId}</code>
-              <small className="inspector-muted">
-                Connect the referenced OpenAPI document to resolve its HTTP contract.
-              </small>
-            </section>
-          )}
-
-          <section>
-            <span>Arazzo invocation</span>
-            <code>{step.operationId ?? step.operationPath ?? step.workflowId}</code>
-          </section>
-
-          {requestBindings.length ? (
-            <section>
-              <span>Request assembled by this step</span>
-              {requestContentType(step) && (
-                <div className="inspector-inline-meta">
-                  <Braces size={13} />
-                  {requestContentType(step)}
-                </div>
+          {tab === "contract" && (
+            <>
+              {step.description && <p className="inspector-step-description">{step.description}</p>}
+              {operationDetails ? (
+                <OpenApiOperationInspector
+                  catalogue={operationDetails.catalogue}
+                  operation={operationDetails.operation}
+                  requestBindings={requestBindings}
+                />
+              ) : (
+                <section>
+                  <span>Operation target</span>
+                  <code>{step.operationId ?? step.operationPath ?? step.workflowId}</code>
+                  <small className="inspector-muted">
+                    Connect the referenced OpenAPI document to resolve its HTTP contract.
+                  </small>
+                </section>
               )}
-              <BindingList bindings={requestBindings} />
-            </section>
-          ) : (
-            <section>
-              <span>Request assembled by this step</span>
-              <p>No Arazzo parameter or request-body overrides are declared.</p>
-            </section>
-          )}
-
-          {dependencies.length > 0 && (
-            <section>
-              <span>Data dependencies</span>
-              <div className="dependency-list">
-                {dependencies.map((dependency, index) => (
-                  <div key={`${dependency.expression}:${dependency.target}:${index}`}>
-                    <code>{dependency.expression}</code>
-                    <ArrowRight size={12} />
-                    <code>{dependency.target}</code>
+              <section>
+                <span>Arazzo invocation</span>
+                <code>{step.operationId ?? step.operationPath ?? step.workflowId}</code>
+              </section>
+              {step.successCriteria?.length ? (
+                <section>
+                  <span>Expected response</span>
+                  <div className="criteria-list">
+                    {step.successCriteria.map((criterion, index) => (
+                      <div key={index}>
+                        <CheckCircle2 size={13} />
+                        <div>
+                          <code>{criterion.condition}</code>
+                          {(criterion.type || criterion.context) && (
+                            <small>
+                              {[criterion.type, criterion.context].filter(Boolean).join(" · ")}
+                            </small>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </section>
+                </section>
+              ) : null}
+            </>
           )}
 
-          <ResponseHandling step={step} />
+          {tab === "data" && (
+            <>
+              {requestBindings.length ? (
+                <section>
+                  <span>Request assembled by this step</span>
+                  {requestContentType(step) && (
+                    <div className="inspector-inline-meta">
+                      <Braces size={13} />
+                      {requestContentType(step)}
+                    </div>
+                  )}
+                  <BindingList bindings={requestBindings} />
+                </section>
+              ) : (
+                <section>
+                  <span>Request assembled by this step</span>
+                  <p>No Arazzo parameter or request-body overrides are declared.</p>
+                </section>
+              )}
 
-          {(step.onSuccess?.length || step.onFailure?.length) && (
-            <section>
-              <span>Flow control</span>
-              <ActionList label="On success" actions={step.onSuccess ?? []} />
-              <ActionList label="On failure" actions={step.onFailure ?? []} />
+              {dependencies.length > 0 && (
+                <section>
+                  <span>Data dependencies</span>
+                  <div className="dependency-list">
+                    {dependencies.map((dependency, index) => (
+                      <div key={`${dependency.expression}:${dependency.target}:${index}`}>
+                        <code>{dependency.expression}</code>
+                        <ArrowRight size={12} />
+                        <code>{dependency.target}</code>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {step.outputs && Object.keys(step.outputs).length > 0 && (
+                <section>
+                  <span>Captured outputs</span>
+                  <KeyValueList values={step.outputs} />
+                </section>
+              )}
+            </>
+          )}
+
+          {tab === "controlFlow" &&
+            (step.onSuccess?.length || step.onFailure?.length ? (
+              <section>
+                <span>Flow control</span>
+                <ActionList label="On success" actions={step.onSuccess ?? []} />
+                <ActionList label="On failure" actions={step.onFailure ?? []} />
+              </section>
+            ) : (
+              <section>
+                <span>Flow control</span>
+                <p>No explicit onSuccess/onFailure actions are declared.</p>
+              </section>
+            ))}
+
+          {tab === "yaml" && (
+            <section className="inspector-yaml">
+              <span>
+                {step.stepId}
+                <button
+                  className="icon-button"
+                  onClick={() =>
+                    yamlSnippet && onCopy(yamlSnippet, `Copied ${step.stepId} YAML`)
+                  }
+                  disabled={!yamlSnippet}
+                  aria-label="Copy step YAML"
+                >
+                  <Copy size={13} />
+                </button>
+              </span>
+              {yamlSnippet ? (
+                <pre>
+                  <code>{yamlSnippet}</code>
+                </pre>
+              ) : (
+                <p>Unable to locate this step in the YAML source.</p>
+              )}
             </section>
           )}
         </div>
@@ -137,7 +238,25 @@ export function SelectionInspector({
     );
   }
 
-  if (!selectedEdge) return null;
+  if (!selectedEdge) {
+    return (
+      <aside
+        className="step-inspector step-inspector--empty"
+        aria-label="Step inspector"
+      >
+        <div className="inspector-empty-state">
+          <span className="inspector-empty-icon">
+            <MousePointer2 size={19} />
+          </span>
+          <h2>Select a step</h2>
+          <p>
+            Choose a step in Graph, Sequence, Docs, the workflow list, or YAML
+            to inspect its contract and data flow.
+          </p>
+        </div>
+      </aside>
+    );
+  }
   const sourceStep = workflow.steps.find(
     (step) => step.stepId === selectedEdge.sourceStepId,
   );
@@ -188,7 +307,15 @@ export function SelectionInspector({
           </section>
         )}
 
-        {selectedEdge.kind === "implicit" ? (
+        {selectedEdge.kind === "data" ? (
+          <section>
+            <span>Data flow</span>
+            <p>
+              This connection exists because the target consumes a runtime value
+              produced by the source.
+            </p>
+          </section>
+        ) : selectedEdge.kind === "implicit" ? (
           <section>
             <span>Implicit progression</span>
             <p>
@@ -208,39 +335,6 @@ export function SelectionInspector({
         )}
       </div>
     </aside>
-  );
-}
-
-function ResponseHandling({ step }: { step: ArazzoStep }) {
-  return (
-    <section>
-      <span>Response handling</span>
-      {step.successCriteria?.length ? (
-        <div className="criteria-list">
-          {step.successCriteria.map((criterion, index) => (
-            <div key={index}>
-              <CheckCircle2 size={13} />
-              <div>
-                <code>{criterion.condition}</code>
-                {(criterion.type || criterion.context) && (
-                  <small>
-                    {[criterion.type, criterion.context].filter(Boolean).join(" · ")}
-                  </small>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p>No explicit success criteria.</p>
-      )}
-      {step.outputs && (
-        <div className="inspector-subsection">
-          <h3>Captured outputs</h3>
-          <KeyValueList values={step.outputs} />
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -320,10 +414,17 @@ function InspectorHeader({
   eyebrow,
   title,
   onClose,
+  stepNav,
 }: {
   eyebrow: string;
   title: string;
   onClose: () => void;
+  stepNav?: {
+    onPrevious: () => void;
+    onNext: () => void;
+    canPrevious: boolean;
+    canNext: boolean;
+  };
 }) {
   return (
     <header>
@@ -331,13 +432,35 @@ function InspectorHeader({
         <p className="view-eyebrow">{eyebrow}</p>
         <h2>{title}</h2>
       </div>
-      <button
-        className="icon-button"
-        onClick={onClose}
-        aria-label="Close inspector"
-      >
-        <ChevronDown size={17} />
-      </button>
+      <div className="inspector-header-actions">
+        {stepNav && (
+          <>
+            <button
+              className="icon-button"
+              onClick={stepNav.onPrevious}
+              disabled={!stepNav.canPrevious}
+              aria-label="Previous step"
+            >
+              <ChevronUp size={15} />
+            </button>
+            <button
+              className="icon-button"
+              onClick={stepNav.onNext}
+              disabled={!stepNav.canNext}
+              aria-label="Next step"
+            >
+              <ChevronDown size={15} />
+            </button>
+          </>
+        )}
+        <button
+          className="icon-button inspector-close"
+          onClick={onClose}
+          aria-label="Close inspector"
+        >
+          <X size={16} />
+        </button>
+      </div>
     </header>
   );
 }

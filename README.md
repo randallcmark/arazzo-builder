@@ -9,14 +9,15 @@ API workflow documents.
   an existing Arazzo YAML/JSON file by picker or drag-and-drop.
 - Restores the active file, its reset baseline, and browser-local draft when one
   exists.
-- Shows inspection-first Flow, top-down Chart, and developer-facing Sequence
-  projections alongside documentation and YAML views. Resolved operations expose
-  their OpenAPI request contract, responses, security, and server details while
-  Arazzo bindings show how inputs and captured outputs move between calls.
-- Frames Sequence calls between a generic initiator, integrating application,
-  and resolved API targets. The initiator/client boundary is explicitly labelled
-  as visualization context because Arazzo declares calls and dependencies, not
-  user-interface actors or internal service behavior.
+- Shows Graph, developer-facing Sequence, documentation, and YAML projections.
+  Graph provides freeform, top-down, by-API, and runtime data-flow modes, while
+  Sequence provides an interactive diagram and detailed call log. Resolved
+  operations expose their OpenAPI request contract, responses, security, and
+  server details while Arazzo bindings show how inputs and captured outputs
+  move between calls.
+- Frames Sequence calls between one neutral workflow runner and the API or
+  nested-workflow targets actually referenced by Arazzo. It does not infer user,
+  application, browser, or internal-service actors.
 - Builds and inserts workflows by dragging or clicking OpenAPI operations onto
   a flow canvas, then refining the selected step in an inspector.
 - Connects named OpenAPI sources from a URL or local YAML/JSON file, enumerates
@@ -26,19 +27,20 @@ API workflow documents.
   cross-origin URLs require an explicit action in the API source dialog.
 - Resolves source-qualified workflow operations back to their API, method, path,
   and summary in both the visual workflow inspector and YAML reference browser.
-- Keeps freeform Flow card positions in browser-local presentation state while
+- Keeps freeform Graph card positions in browser-local presentation state while
   execution order remains explicit in the Arazzo `steps` sequence.
-- Shares step selection across Flow, Chart, and Sequence; links can be selected
-  in Flow and Chart to inspect their routes, conditions, and retry semantics.
+- Shares step selection across workspace views; Graph connections can be
+  selected to inspect their routes, runtime values, conditions, and retry
+  semantics.
 - Keeps structural editing and execution reordering in the dedicated visual
   workflow builder.
-- Keeps long sequence diagrams at a readable scale with pan, zoom, fit, and
-  reset controls.
+- Keeps long sequence diagrams readable as a scrollable DOM projection and
+  offers a document-oriented call log with Markdown, Mermaid, and print output.
 - Synchronizes selected workflow steps with their YAML source range and maps
   YAML cursor positions back to steps.
 - Provides document-level undo and redo while preserving the exact YAML source,
   including comments.
-- Keeps Flow coordinates browser-local unless the user explicitly embeds the
+- Keeps Graph coordinates browser-local unless the user explicitly embeds the
   portable `x-arazzo-builder-layout` workflow extension.
 - Validates core Arazzo structure and cross-step `goto` references.
 - Exports the current document without requiring server-side storage.
@@ -85,6 +87,8 @@ See:
 - `docs/architecture.md` for data flow, invariants, trust boundaries, and known
   limitations.
 - `docs/development.md` for customization, validation, and deployment.
+- `docs/design-system.md` for visual tokens, components, view semantics,
+  interaction rules, and responsive behaviour.
 - `docs/review-checklist.md` for an evidence-only independent review.
 - `docs/provenance.md` for the clean-room implementation boundary.
 - `SECURITY.md` for the explicit security and data-handling model.

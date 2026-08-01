@@ -1,4 +1,5 @@
 import type { ArazzoAction, ArazzoWorkflow } from "./arazzo";
+import { runtimeExpressions, stepRequestBindings } from "./workflow-detail";
 
 export type WorkflowEdgeKind =
   | "system"
@@ -6,7 +7,8 @@ export type WorkflowEdgeKind =
   | "success"
   | "failure"
   | "retry"
-  | "end";
+  | "end"
+  | "data";
 
 export type WorkflowEdge = {
   id: string;
@@ -96,6 +98,64 @@ export function workflowEdges(workflow: ArazzoWorkflow): WorkflowEdge[] {
   });
 
   return edges;
+}
+
+export function workflowDataEdges(workflow: ArazzoWorkflow): WorkflowEdge[] {
+  const edges = new Map<string, WorkflowEdge>();
+  const addEdge = (
+    source: string,
+    target: string,
+    label: string,
+    sourceStepId?: string,
+    targetStepId?: string,
+  ) => {
+    const id = `data:${source}:${target}`;
+    const existing = edges.get(id);
+    if (existing) {
+      const labels = new Set((existing.label ?? "").split(", ").filter(Boolean));
+      labels.add(label);
+      existing.label = Array.from(labels).join(", ");
+      return;
+    }
+    edges.set(id, {
+      id,
+      source,
+      target,
+      kind: "data",
+      label,
+      ...(sourceStepId ? { sourceStepId } : {}),
+      ...(targetStepId ? { targetStepId } : {}),
+    });
+  };
+
+  for (const step of workflow.steps) {
+    for (const binding of stepRequestBindings(step)) {
+      for (const expression of binding.expressions) {
+        const input = expression.match(/^\$inputs\.([A-Za-z0-9_-]+)/);
+        if (input) {
+          addEdge("input", step.stepId, input[1], undefined, step.stepId);
+          continue;
+        }
+        const output = expression.match(
+          /^\$steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)/,
+        );
+        if (output) {
+          addEdge(output[1], step.stepId, output[2], output[1], step.stepId);
+        }
+      }
+    }
+  }
+
+  for (const [name, value] of Object.entries(workflow.outputs ?? {})) {
+    for (const expression of runtimeExpressions(value)) {
+      const output = expression.match(
+        /^\$steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)/,
+      );
+      if (output) addEdge(output[1], "output", name, output[1]);
+    }
+  }
+
+  return Array.from(edges.values());
 }
 
 function actionEdge(
