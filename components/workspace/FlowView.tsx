@@ -24,7 +24,11 @@ import {
   type OpenApiOperation,
 } from "@/lib/openapi";
 import { sequenceParticipant } from "@/lib/sequence";
-import { workflowEdges, type WorkflowEdge } from "@/lib/workflow-graph";
+import {
+  workflowDataEdges,
+  workflowEdges,
+  type WorkflowEdge,
+} from "@/lib/workflow-graph";
 import {
   defaultWorkflowLayout,
   embeddedWorkflowLayout,
@@ -33,7 +37,7 @@ import {
   type WorkflowNodeLayout,
 } from "@/lib/workflow-layout";
 
-export type GraphLayoutMode = "freeform" | "topdown" | "byapi";
+export type GraphLayoutMode = "freeform" | "topdown" | "byapi" | "dataflow";
 
 type FlowNodeData = {
   kind: "input" | "step" | "output";
@@ -99,7 +103,10 @@ export function FlowView({
   catalogues?: ApiCatalogue[];
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>([]);
-  const graphEdges = useMemo(() => workflowEdges(workflow), [workflow]);
+  const graphEdges = useMemo(
+    () => (mode === "dataflow" ? workflowDataEdges(workflow) : workflowEdges(workflow)),
+    [mode, workflow],
+  );
 
   useEffect(() => {
     const savedLayout =
@@ -134,6 +141,12 @@ export function FlowView({
         <div className="flow-canvas-note">
           <Move size={14} />
           <span>Drag cards to arrange this view. Execution is unchanged.</span>
+        </div>
+      )}
+      {mode === "dataflow" && (
+        <div className="flow-canvas-note">
+          <Braces size={14} />
+          <span>Edges show runtime values consumed and produced by each step.</span>
         </div>
       )}
       <ReactFlow
@@ -313,6 +326,7 @@ function flowEdge(edge: WorkflowEdge, selected: boolean): Edge {
     failure: "#c4486b",
     retry: "#d9a900",
     end: "#7454e8",
+    data: "#5b68f6",
   };
   return {
     id: edge.id,

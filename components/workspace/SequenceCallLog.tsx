@@ -2,6 +2,7 @@
 
 import {
   ArrowDownToLine,
+  Braces,
   ChevronDown,
   ChevronsDownUp,
   ChevronUp,
@@ -11,7 +12,11 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArazzoSpec, ArazzoWorkflow } from "@/lib/arazzo";
 import type { ApiCatalogue } from "@/lib/openapi";
-import { sequenceCallDetails, type SequenceCallDetail } from "@/lib/sequence";
+import {
+  sequenceCallDetails,
+  sequenceToMermaid,
+  type SequenceCallDetail,
+} from "@/lib/sequence";
 
 export function SequenceCallLog({
   spec,
@@ -20,6 +25,7 @@ export function SequenceCallLog({
   selectedStepId,
   onStepSelect,
   onCopyMarkdown,
+  onCopyMermaid,
 }: {
   spec: ArazzoSpec;
   workflow: ArazzoWorkflow;
@@ -27,6 +33,7 @@ export function SequenceCallLog({
   selectedStepId: string | null;
   onStepSelect: (stepId: string) => void;
   onCopyMarkdown: (markdown: string) => void;
+  onCopyMermaid: (mermaid: string) => void;
 }) {
   const details = useMemo(
     () => sequenceCallDetails(spec, workflow, catalogues),
@@ -71,6 +78,15 @@ export function SequenceCallLog({
     });
   };
 
+  const printAll = () => {
+    const previouslyExpanded = expanded;
+    setExpanded(new Set(details.map((detail) => detail.step.stepId)));
+    window.requestAnimationFrame(() => {
+      window.print();
+      setExpanded(previouslyExpanded);
+    });
+  };
+
   return (
     <div className="sequence-call-log">
       <div className="call-log-toolbar">
@@ -89,7 +105,14 @@ export function SequenceCallLog({
           <ClipboardCopy size={13} />
           Copy as Markdown
         </button>
-        <button className="quiet-button" onClick={() => window.print()}>
+        <button
+          className="quiet-button"
+          onClick={() => onCopyMermaid(sequenceToMermaid(spec, workflow, catalogues))}
+        >
+          <Braces size={13} />
+          Copy as Mermaid
+        </button>
+        <button className="quiet-button" onClick={printAll}>
           <Printer size={13} />
           Print
         </button>

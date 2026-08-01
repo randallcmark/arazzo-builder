@@ -46,7 +46,7 @@ import {
   parseOpenApiSource,
   type ApiCatalogue,
 } from "@/lib/openapi";
-import { workflowEdges } from "@/lib/workflow-graph";
+import { workflowDataEdges, workflowEdges } from "@/lib/workflow-graph";
 import {
   defaultWorkflowLayout,
   embeddedWorkflowLayout,
@@ -82,6 +82,7 @@ const graphLayoutOptions: Array<{ id: GraphLayoutMode; label: string }> = [
   { id: "freeform", label: "Freeform" },
   { id: "topdown", label: "Top-down" },
   { id: "byapi", label: "By API" },
+  { id: "dataflow", label: "Data flow" },
 ];
 
 const sequenceDensityOptions: Array<{ id: SequenceDensity; label: string }> = [
@@ -160,8 +161,13 @@ export function Workspace() {
     spec?.workflows[0] ??
     null;
   const graphEdges = useMemo(
-    () => (workflow ? workflowEdges(workflow) : []),
-    [workflow],
+    () =>
+      workflow
+        ? graphLayout === "dataflow"
+          ? workflowDataEdges(workflow)
+          : workflowEdges(workflow)
+        : [],
+    [graphLayout, workflow],
   );
   const selectedEdge =
     graphEdges.find((edge) => edge.id === selectedEdgeId) ?? null;
@@ -629,6 +635,7 @@ export function Workspace() {
                   <button
                     role="tab"
                     aria-selected={view === id}
+                    aria-label={label}
                     aria-controls="workspace-view-panel"
                     id={`workspace-tab-${id}`}
                     tabIndex={view === id ? 0 : -1}
@@ -638,7 +645,7 @@ export function Workspace() {
                     onKeyDown={(event) => handleViewTabKeyDown(event, id)}
                   >
                     <Icon size={15} />
-                    {label}
+                    <span className="view-tab-label">{label}</span>
                   </button>
                 ))}
               </div>
@@ -699,7 +706,7 @@ export function Workspace() {
               >
                 <Redo2 size={14} />
               </button>
-              {workflow && (
+              {workflow && view === "graph" && (
                 <>
                   <button
                     className={`quiet-button layout-extension-button ${
@@ -713,7 +720,9 @@ export function Workspace() {
                     }
                   >
                     <Save size={13} />
-                    {embeddedLayout ? "Layout embedded" : "Embed layout"}
+                    <span className="layout-extension-label">
+                      {embeddedLayout ? "Layout embedded" : "Embed layout"}
+                    </span>
                   </button>
                   <div className="active-workflow-label">
                     <Circle size={8} fill="currentColor" />
@@ -812,6 +821,9 @@ export function Workspace() {
                 onCopyMarkdown={(markdown) =>
                   void copyText(markdown, "Call log copied as Markdown")
                 }
+                onCopyMermaid={(mermaid) =>
+                  void copyText(mermaid, "Sequence copied as Mermaid")
+                }
               />
             ) : view === "docs" ? (
               <DocumentationView
@@ -822,24 +834,21 @@ export function Workspace() {
           </div>
         </section>
 
-        {workflow &&
-          (selectedStepId || selectedEdge) &&
-          ["graph", "sequence"].includes(view) && (
-            <SelectionInspector
-              key={selectedStepId ?? selectedEdge?.id ?? "inspector"}
-              workflow={workflow}
-              source={source}
-              selectedStepId={selectedStepId}
-              selectedEdge={selectedEdge}
-              catalogues={catalogues}
-              onSelectStep={setSelectedStepId}
-              onCopy={(value, message) => void copyText(value, message)}
-              onClose={() => {
-                setSelectedStepId(null);
-                setSelectedEdgeId(null);
-              }}
-            />
-          )}
+        {workflow && (
+          <SelectionInspector
+            workflow={workflow}
+            source={source}
+            selectedStepId={selectedStepId}
+            selectedEdge={selectedEdge}
+            catalogues={catalogues}
+            onSelectStep={setSelectedStepId}
+            onCopy={(value, message) => void copyText(value, message)}
+            onClose={() => {
+              setSelectedStepId(null);
+              setSelectedEdgeId(null);
+            }}
+          />
+        )}
       </div>
 
       <AddWorkflowDialog

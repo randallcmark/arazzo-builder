@@ -15,6 +15,7 @@ export function SequenceView({
   selectedStepId,
   onStepSelect,
   onCopyMarkdown,
+  onCopyMermaid,
 }: {
   spec: ArazzoSpec;
   workflow: ArazzoWorkflow;
@@ -23,6 +24,7 @@ export function SequenceView({
   selectedStepId: string | null;
   onStepSelect: (stepId: string) => void;
   onCopyMarkdown: (markdown: string) => void;
+  onCopyMermaid: (mermaid: string) => void;
 }) {
   if (density === "callLog") {
     return (
@@ -33,6 +35,7 @@ export function SequenceView({
         selectedStepId={selectedStepId}
         onStepSelect={onStepSelect}
         onCopyMarkdown={onCopyMarkdown}
+        onCopyMermaid={onCopyMermaid}
       />
     );
   }

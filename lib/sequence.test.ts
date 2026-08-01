@@ -5,6 +5,7 @@ import {
   sequenceCallDetail,
   sequenceCallDetails,
   sequenceLanes,
+  sequenceToMermaid,
   statusCodeFromCriteria,
 } from "./sequence";
 
@@ -176,5 +177,18 @@ describe("sequenceCallDetail / sequenceCallDetails", () => {
   it("returns one detail per step, in order", () => {
     const details = sequenceCallDetails(spec, spec.workflows[0], catalogues);
     expect(details.map((detail) => detail.step.stepId)).toEqual(["find-worker"]);
+  });
+
+  it("exports the same real participants and request exchange as Mermaid", () => {
+    const mermaid = sequenceToMermaid(spec, spec.workflows[0], catalogues);
+
+    expect(mermaid).toContain("sequenceDiagram");
+    expect(mermaid).toContain("participant runner as This workflow");
+    expect(mermaid).toContain("participant target1 as Deel API");
+    expect(mermaid).toContain("runner->>+target1: GET /rest/v2/people");
+    expect(mermaid).toContain("query.search = $inputs.worker_email");
+    expect(mermaid).toContain("target1-->>-runner: Response 200");
+    expect(mermaid).not.toContain("Initiator");
+    expect(mermaid).not.toContain("Integrating application");
   });
 });

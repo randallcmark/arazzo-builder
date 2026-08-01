@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ArazzoWorkflow } from "./arazzo";
-import { workflowEdges } from "./workflow-graph";
+import { workflowDataEdges, workflowEdges } from "./workflow-graph";
 
 describe("workflow graph projection", () => {
   it("creates implicit sequential edges for an ordered workflow", () => {
@@ -51,5 +51,43 @@ describe("workflow graph projection", () => {
       target: "first",
       channel: "onFailure",
     });
+  });
+
+  it("projects inputs, inter-step outputs, and workflow outputs as data edges", () => {
+    const workflow: ArazzoWorkflow = {
+      workflowId: "data-flow",
+      inputs: {
+        properties: { email: { type: "string" } },
+      },
+      steps: [
+        {
+          stepId: "find",
+          operationId: "findWorker",
+          parameters: [{ name: "email", in: "query", value: "$inputs.email" }],
+          outputs: { worker_id: "$response.body#/id" },
+        },
+        {
+          stepId: "load",
+          operationId: "loadWorker",
+          parameters: [
+            {
+              name: "worker_id",
+              in: "path",
+              value: "$steps.find.outputs.worker_id",
+            },
+          ],
+          outputs: { contract_id: "$response.body#/contract_id" },
+        },
+      ],
+      outputs: {
+        contract_id: "$steps.load.outputs.contract_id",
+      },
+    };
+
+    expect(workflowDataEdges(workflow)).toEqual([
+      expect.objectContaining({ source: "input", target: "find", label: "email", kind: "data" }),
+      expect.objectContaining({ source: "find", target: "load", label: "worker_id", kind: "data" }),
+      expect.objectContaining({ source: "load", target: "output", label: "contract_id", kind: "data" }),
+    ]);
   });
 });

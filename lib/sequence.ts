@@ -163,3 +163,87 @@ export function sequenceCallDetails(
     sequenceCallDetail(spec, workflow, step, catalogues),
   );
 }
+
+/**
+ * Produces a portable Mermaid sequence definition without using Mermaid in the
+ * application runtime. The export uses the same honest participants and call
+ * details as the DOM diagram, so pasted diagrams do not reintroduce fictional
+ * actors or drift from the on-screen projection.
+ */
+export function sequenceToMermaid(
+  spec: ArazzoSpec,
+  workflow: ArazzoWorkflow,
+  catalogues: ApiCatalogue[],
+): string {
+  const lanes = sequenceLanes(spec, workflow, catalogues);
+  const aliases = new Map(
+    lanes.map((lane, index) => [lane.key, index === 0 ? "runner" : `target${index}`]),
+  );
+  const lines = ["sequenceDiagram", "  autonumber"];
+
+  for (const lane of lanes) {
+    lines.push(
+      `  participant ${aliases.get(lane.key)} as ${mermaidText(lane.label)}`,
+    );
+  }
+
+  const inputs = Object.keys(workflow.inputs?.properties ?? {});
+  if (inputs.length) {
+    lines.push(`  Note over runner: Inputs · ${inputs.map(mermaidText).join(", ")}`);
+  }
+
+  for (const detail of sequenceCallDetails(spec, workflow, catalogues)) {
+    const target = aliases.get(detail.participant.key) ?? "runner";
+    const call = detail.operation
+      ? `${detail.operation.method} ${detail.operation.path}`
+      : detail.step.workflowId
+        ? `Workflow ${detail.step.workflowId}`
+        : detail.step.operationId ?? detail.step.operationPath ?? detail.step.stepId;
+    lines.push(`  runner->>+${target}: ${mermaidText(call)}`);
+    if (detail.requestBindings.length) {
+      lines.push(
+        `  Note over runner,${target}: Sends · ${detail.requestBindings
+          .map((binding) => `${binding.target} = ${binding.value}`)
+          .map(mermaidText)
+          .join("; ")}`,
+      );
+    }
+    lines.push(
+      `  ${target}-->>-runner: ${mermaidText(
+        detail.statusCode ? `Response ${detail.statusCode}` : "Response",
+      )}`,
+    );
+    const captures = Object.entries(detail.outputs);
+    if (captures.length) {
+      lines.push(
+        `  Note over runner,${target}: Captures · ${captures
+          .map(([name, expression]) => `${name} ← ${expression}`)
+          .map(mermaidText)
+          .join("; ")}`,
+      );
+    }
+  }
+
+  const outputs = Object.keys(workflow.outputs ?? {});
+  if (outputs.length) {
+    lines.push(`  Note over runner: Outputs · ${outputs.map(mermaidText).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+function mermaidText(value: string): string {
+  return value
+    .replace(/\r?\n/g, " ")
+    .replace(/[;:#"<>]/g, (character) => {
+      const entities: Record<string, string> = {
+        ";": "#59;",
+        ":": "#58;",
+        "#": "#35;",
+        '"': "#34;",
+        "<": "#60;",
+        ">": "#62;",
+      };
+      return entities[character];
+    })
+    .trim();
+}

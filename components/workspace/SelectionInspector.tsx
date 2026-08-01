@@ -8,6 +8,7 @@ import {
   ChevronUp,
   Copy,
   GitBranch,
+  MousePointer2,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -112,6 +113,7 @@ export function SelectionInspector({
                 <OpenApiOperationInspector
                   catalogue={operationDetails.catalogue}
                   operation={operationDetails.operation}
+                  requestBindings={requestBindings}
                 />
               ) : (
                 <section>
@@ -236,7 +238,25 @@ export function SelectionInspector({
     );
   }
 
-  if (!selectedEdge) return null;
+  if (!selectedEdge) {
+    return (
+      <aside
+        className="step-inspector step-inspector--empty"
+        aria-label="Step inspector"
+      >
+        <div className="inspector-empty-state">
+          <span className="inspector-empty-icon">
+            <MousePointer2 size={19} />
+          </span>
+          <h2>Select a step</h2>
+          <p>
+            Choose a step in Graph, Sequence, Docs, the workflow list, or YAML
+            to inspect its contract and data flow.
+          </p>
+        </div>
+      </aside>
+    );
+  }
   const sourceStep = workflow.steps.find(
     (step) => step.stepId === selectedEdge.sourceStepId,
   );
@@ -287,7 +307,15 @@ export function SelectionInspector({
           </section>
         )}
 
-        {selectedEdge.kind === "implicit" ? (
+        {selectedEdge.kind === "data" ? (
+          <section>
+            <span>Data flow</span>
+            <p>
+              This connection exists because the target consumes a runtime value
+              produced by the source.
+            </p>
+          </section>
+        ) : selectedEdge.kind === "implicit" ? (
           <section>
             <span>Implicit progression</span>
             <p>

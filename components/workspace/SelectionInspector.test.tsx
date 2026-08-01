@@ -127,6 +127,8 @@ describe("selection inspector", () => {
     expect(screen.getByText("POST")).toBeTruthy();
     expect(screen.getByText("/records")).toBeTruthy();
     expect(screen.getByText("Idempotency-Key")).toBeTruthy();
+    expect(screen.getByText("Declared parameters versus this step")).toBeTruthy();
+    expect(screen.getByText("Required · not set")).toBeTruthy();
     expect(screen.getByText("$statusCode == 201")).toBeTruthy();
     expect(screen.getByText("bearerAuth")).toBeTruthy();
   });
@@ -182,5 +184,41 @@ describe("selection inspector", () => {
     expect(screen.getByText("Exchange between steps")).toBeTruthy();
     expect(screen.getByText("path.record_id")).toBeTruthy();
     expect(screen.getAllByText("$steps.create.outputs.record_id").length).toBeGreaterThan(0);
+  });
+
+  it("shows an empty-state rail when nothing is selected", () => {
+    renderInspector({ selectedStepId: null, selectedEdge: null });
+
+    expect(screen.getByText("Select a step")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Choose a step in Graph, Sequence, Docs, the workflow list, or YAML to inspect its contract and data flow.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("matches an Arazzo request binding to its declared OpenAPI parameter", () => {
+    const boundWorkflow: ArazzoWorkflow = {
+      ...workflow,
+      steps: workflow.steps.map((step) =>
+        step.stepId === "create"
+          ? {
+              ...step,
+              parameters: [
+                {
+                  name: "Idempotency-Key",
+                  in: "header",
+                  value: "$inputs.idempotency_key",
+                },
+              ],
+            }
+          : step,
+      ),
+    };
+
+    renderInspector({ workflow: boundWorkflow });
+
+    expect(screen.getByText("$inputs.idempotency_key")).toBeTruthy();
+    expect(screen.queryByText("Required · not set")).toBeNull();
   });
 });

@@ -42,13 +42,20 @@ vi.mock("next/link", () => ({
 
 vi.mock("./FlowView", () => ({
   FlowView: ({
+    mode,
     onStepSelect,
+    onEdgeSelect,
   }: {
+    mode: string;
     onStepSelect: (stepId: string) => void;
+    onEdgeSelect: (edgeId: string) => void;
   }) => (
     <div data-testid="flow-view">
       Flow projection
       <button onClick={() => onStepSelect("find-worker")}>Select flow step</button>
+      {mode === "dataflow" && (
+        <button onClick={() => onEdgeSelect("data:input:find-worker")}>Select data edge</button>
+      )}
     </div>
   ),
 }));
@@ -71,7 +78,21 @@ vi.mock("./DocumentationView", () => ({
   DocumentationView: () => <div>Documentation projection</div>,
 }));
 vi.mock("./SelectionInspector", () => ({
-  SelectionInspector: () => <aside>Selected step inspector</aside>,
+  SelectionInspector: ({
+    selectedStepId,
+    selectedEdge,
+  }: {
+    selectedStepId: string | null;
+    selectedEdge: { kind: string } | null;
+  }) => (
+    <aside>
+      {selectedStepId
+        ? "Selected step inspector"
+        : selectedEdge
+          ? `Selected ${selectedEdge.kind} edge inspector`
+          : "Empty step inspector"}
+    </aside>
+  ),
 }));
 vi.mock("./AddWorkflowDialog", () => ({
   AddWorkflowDialog: () => null,
@@ -254,5 +275,33 @@ describe("Workspace recovery", () => {
 
     await user.click(screen.getByRole("tab", { name: "Graph" }));
     expect(screen.getByText("Selected step inspector")).toBeTruthy();
+  });
+
+  it("keeps a stable inspector rail across all workspace views", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    render(<Workspace />);
+
+    await screen.findByTestId("flow-view");
+    expect(screen.getByText("Empty step inspector")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Select flow step" }));
+    await user.click(screen.getByRole("tab", { name: "Docs" }));
+    expect(screen.getByText("Selected step inspector")).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    expect(screen.getByText("Selected step inspector")).toBeTruthy();
+  });
+
+  it("resolves a selected data-flow edge into the inspector", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    render(<Workspace />);
+
+    await screen.findByTestId("flow-view");
+    await user.click(screen.getByRole("tab", { name: "Data flow" }));
+    await user.click(screen.getByRole("button", { name: "Select data edge" }));
+
+    expect(screen.getByText("Selected data edge inspector")).toBeTruthy();
   });
 });

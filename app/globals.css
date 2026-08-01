@@ -15,6 +15,14 @@
   --orange: #ffd447;
   --orange-soft: #fff0a6;
   --red: #c4486b;
+  --method-get: #4167d8;
+  --method-post: #168163;
+  --method-write: #8a6b00;
+  --status-success: #168163;
+  --status-success-bg: #e7f0eb;
+  --status-error-bg: #f8e8ed;
+  --surface-sequence: #fbfaff;
+  --surface-code: #f8f7ff;
   --line: rgba(32, 32, 75, 0.11);
   --line-strong: rgba(32, 32, 75, 0.22);
   --shadow: 0 28px 80px rgba(67, 54, 154, 0.16);
@@ -843,6 +851,7 @@ a {
 }
 
 .workspace-main {
+  container-type: inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -1063,20 +1072,24 @@ a {
 }
 
 .workflow-graph--topdown .loom-node,
-.workflow-graph--byapi .loom-node {
+.workflow-graph--byapi .loom-node,
+.workflow-graph--dataflow .loom-node {
   min-height: 112px;
   width: 270px;
 }
 
 .workflow-graph--topdown .loom-node > div:nth-child(3),
-.workflow-graph--byapi .loom-node > div:nth-child(3) {
+.workflow-graph--byapi .loom-node > div:nth-child(3),
+.workflow-graph--dataflow .loom-node > div:nth-child(3) {
   min-width: 0;
 }
 
 .workflow-graph--topdown .loom-node small,
 .workflow-graph--topdown .loom-node strong,
 .workflow-graph--byapi .loom-node small,
-.workflow-graph--byapi .loom-node strong {
+.workflow-graph--byapi .loom-node strong,
+.workflow-graph--dataflow .loom-node small,
+.workflow-graph--dataflow .loom-node strong {
   max-width: 205px;
 }
 
@@ -1146,9 +1159,10 @@ a {
   background: var(--cream);
   border-left: 1px solid var(--line);
   display: flex;
-  flex: 0 0 min(410px, 34vw);
+  flex: 0 0 400px;
   flex-direction: column;
-  min-width: 350px;
+  min-width: 0;
+  width: 400px;
 }
 
 .step-inspector > header {
@@ -1180,6 +1194,36 @@ a {
   padding: 18px;
 }
 
+.step-inspector--empty {
+  align-items: center;
+  justify-content: center;
+}
+
+.inspector-empty-state {
+  max-width: 260px;
+  padding: 30px;
+  text-align: center;
+}
+
+.inspector-empty-icon {
+  align-items: center;
+  background: var(--mint);
+  border-radius: 999px;
+  color: var(--forest-2);
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  margin-bottom: 14px;
+  width: 44px;
+}
+
+.inspector-empty-state p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 8px 0 0;
+}
+
 .inspector-body section {
   border-bottom: 1px solid var(--line);
   padding: 15px 0;
@@ -1193,7 +1237,7 @@ a {
   color: var(--ink-soft);
   display: block;
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   margin-bottom: 8px;
   text-transform: uppercase;
@@ -1210,7 +1254,7 @@ a {
   background: var(--paper);
   display: block;
   font-family: var(--font-mono), monospace;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.5;
   margin-top: 5px;
   overflow-wrap: anywhere;
@@ -1220,7 +1264,7 @@ a {
 .inspector-body h3 {
   color: var(--ink-soft);
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.06em;
   margin: 14px 0 8px;
   text-transform: uppercase;
@@ -1230,7 +1274,7 @@ a {
   color: var(--ink-soft);
   display: block;
   font-family: var(--font-mono), monospace;
-  font-size: 7px;
+  font-size: 10px;
   line-height: 1.5;
   margin-top: 8px;
   overflow-wrap: anywhere;
@@ -1273,22 +1317,22 @@ a {
   color: white;
   flex: 0 0 auto;
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.04em;
   padding: 8px;
 }
 
 .http-method--get {
-  background: #4167d8;
+  background: var(--method-get);
 }
 
 .http-method--post {
-  background: #168163;
+  background: var(--method-post);
 }
 
 .http-method--put,
 .http-method--patch {
-  background: #a76f00;
+  background: var(--method-write);
 }
 
 .http-method--delete {
@@ -1301,7 +1345,7 @@ a {
   color: var(--red);
   display: inline-block;
   font-family: var(--font-mono), monospace;
-  font-size: 7px;
+  font-size: 10px;
   margin-top: 8px;
   padding: 5px 7px;
   text-transform: uppercase;
@@ -1319,7 +1363,7 @@ a {
   border-radius: 999px;
   color: var(--forest-2);
   font-family: var(--font-mono), monospace;
-  font-size: 7px;
+  font-size: 10px;
   font-style: normal;
   padding: 5px 7px;
 }
@@ -1333,7 +1377,7 @@ a {
   color: var(--forest-2);
   display: flex;
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   gap: 6px;
   margin: 8px 0;
 }
@@ -1358,13 +1402,13 @@ a {
 }
 
 .api-contract-group article strong {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .api-contract-group article small {
   color: var(--ink-soft);
   font-family: var(--font-mono), monospace;
-  font-size: 7px;
+  font-size: 10px;
 }
 
 .api-contract-group article code {
@@ -1376,6 +1420,60 @@ a {
 
 .api-contract-group article p {
   margin-top: 7px;
+}
+
+.parameter-coverage {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.parameter-coverage-heading,
+.parameter-coverage article {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.parameter-coverage-heading {
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 8px 9px;
+  text-transform: uppercase;
+}
+
+.api-contract-group .parameter-coverage article {
+  border-radius: 0;
+  margin: 0;
+}
+
+.parameter-coverage article + article {
+  border-top: 1px solid var(--line);
+}
+
+.api-contract-group .parameter-coverage article > div:first-child {
+  display: block;
+}
+
+.parameter-coverage article.is-unset {
+  background: var(--paper);
+  color: var(--ink-soft);
+}
+
+.parameter-coverage article code {
+  display: block;
+  margin: 0 0 5px;
+  padding: 6px;
+}
+
+.parameter-unset {
+  color: var(--ink-soft);
+  display: block;
+  font-size: 10px;
+  padding-top: 2px;
 }
 
 .api-response-row {
@@ -1390,7 +1488,7 @@ a {
   border-radius: 7px;
   color: var(--forest-2);
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   padding: 6px;
   text-align: center;
 }
@@ -1430,7 +1528,7 @@ a {
   border-radius: 6px;
   color: var(--forest-2);
   font-family: var(--font-mono), monospace;
-  font-size: 6px;
+  font-size: 10px;
   padding: 4px 5px;
 }
 
@@ -1451,7 +1549,7 @@ a {
 
 .key-value-list strong {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .dependency-list > div {
@@ -1480,7 +1578,7 @@ a {
   color: var(--ink-soft);
   display: block;
   font-family: var(--font-mono), monospace;
-  font-size: 7px;
+  font-size: 10px;
   margin-top: 3px;
 }
 
@@ -1499,14 +1597,14 @@ a {
 }
 
 .action-summary > div strong {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .action-summary small {
   color: var(--ink-soft);
   display: block;
   font-family: var(--font-mono), monospace;
-  font-size: 7px;
+  font-size: 10px;
   margin-top: 5px;
 }
 
@@ -1514,7 +1612,7 @@ a {
   align-items: center;
   border-radius: 999px;
   display: inline-flex;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
   gap: 6px;
   padding: 7px 9px;
@@ -1546,6 +1644,11 @@ a {
   color: var(--forest-2);
 }
 
+.connection-kind--data {
+  background: var(--mint);
+  color: var(--forest);
+}
+
 .connection-route {
   align-items: center;
   display: grid;
@@ -1556,7 +1659,7 @@ a {
 
 .connection-route span {
   color: var(--ink-soft);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .docs-view {
@@ -3603,6 +3706,7 @@ body {
 .toolbar-tab-cluster {
   align-items: center;
   display: flex;
+  flex: 1 1 auto;
   gap: 12px;
   min-width: 0;
   overflow-x: auto;
@@ -3625,6 +3729,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 999px;
   display: flex;
+  flex: 0 0 auto;
   gap: 2px;
   padding: 2px;
 }
@@ -3640,7 +3745,7 @@ body {
   border-radius: 999px;
   color: var(--ink-soft);
   cursor: pointer;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 650;
   padding: 6px 10px;
   white-space: nowrap;
@@ -3714,7 +3819,7 @@ body {
 }
 
 .sequence-lane-header {
-  background: #fbfaff;
+  background: var(--surface-sequence);
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 12px;
@@ -3752,7 +3857,7 @@ body {
 .sequence-lane-card small {
   color: var(--ink-soft);
   font-family: var(--font-mono), monospace;
-  font-size: 7px;
+  font-size: 10px;
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3795,7 +3900,7 @@ body {
 
 .sequence-io-strip {
   align-items: center;
-  background: #faf9ff;
+  background: var(--surface-sequence);
   border: 1px dashed var(--line-strong);
   border-radius: 12px;
   display: flex;
@@ -3813,14 +3918,14 @@ body {
 .sequence-io-label {
   color: var(--ink-soft);
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .sequence-io-strip code {
   font-family: var(--font-mono), monospace;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -3940,7 +4045,7 @@ body {
   display: inline-flex;
   flex: 0 0 auto;
   font-family: var(--font-mono), monospace;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   height: 22px;
   justify-content: center;
@@ -3977,7 +4082,7 @@ body {
   display: inline-flex;
   flex: 0 0 auto;
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   height: 22px;
   justify-content: center;
@@ -4008,15 +4113,15 @@ body {
   color: var(--ink-soft);
   display: inline-flex;
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   gap: 4px;
   padding: 3px 8px;
 }
 
 .sequence-chip--status {
-  background: #e7f0eb;
+  background: var(--status-success-bg);
   border-color: transparent;
-  color: #168163;
+  color: var(--status-success);
   font-weight: 700;
 }
 
@@ -4028,7 +4133,7 @@ body {
 }
 
 .workspace-canvas--sequence {
-  background: #fbfaff;
+  background: var(--surface-sequence);
 }
 
 /* Sequence — Call log density */
@@ -4065,7 +4170,7 @@ body {
 .call-log-nav > p {
   color: var(--ink-soft);
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   margin: 0 0 10px;
   text-transform: uppercase;
@@ -4103,9 +4208,9 @@ body {
 }
 
 .call-log-nav-item small {
-  color: #4167d8;
+  color: var(--method-get);
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   margin-left: auto;
 }
 
@@ -4136,14 +4241,14 @@ body {
   color: var(--ink-soft);
   display: block;
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   margin-bottom: 9px;
   text-transform: uppercase;
 }
 
 .call-log-eyebrow--response {
-  color: #168163;
+  color: var(--status-success);
 }
 
 .call-log-input-list {
@@ -4225,7 +4330,7 @@ body {
   border-radius: 999px;
   color: var(--ink-soft);
   font-family: var(--font-mono), monospace;
-  font-size: 8px;
+  font-size: 10px;
   margin-left: auto;
   padding: 5px 9px;
 }
@@ -4253,10 +4358,10 @@ body {
 }
 
 .call-log-code-block {
-  background: #f8f7ff;
+  background: var(--surface-code);
   border-radius: 10px;
   font-family: var(--font-mono), monospace;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.75;
   padding: 10px;
 }
@@ -4284,11 +4389,11 @@ body {
 }
 
 .call-log-status-badge {
-  background: #e7f0eb;
+  background: var(--status-success-bg);
   border-radius: 7px;
-  color: #168163;
+  color: var(--status-success);
   font-family: var(--font-mono), monospace;
-  font-size: 9px;
+  font-size: 10px;
   padding: 5px 7px;
 }
 
@@ -4313,6 +4418,115 @@ body {
 .call-log-output-expression {
   color: var(--ink-soft);
   font-weight: 400;
+}
+
+@container (max-width: 720px) {
+  .workspace-toolbar {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .view-tab-label,
+  .layout-extension-label,
+  .active-workflow-label {
+    display: none;
+  }
+
+  .view-tabs button {
+    padding: 8px;
+  }
+
+  .layout-extension-button {
+    height: 30px;
+    justify-content: center;
+    padding: 0;
+    width: 30px;
+  }
+
+  .mode-switch button {
+    padding: 6px 8px;
+  }
+
+  .call-log-nav {
+    display: none;
+  }
+
+  .call-log-main {
+    padding: 20px;
+  }
+
+  .call-log-call-body {
+    grid-template-columns: 1fr;
+  }
+
+  .call-log-request {
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
+  }
+
+  .call-log-call-header {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 1040px) {
+  .step-inspector {
+    bottom: 0;
+    box-shadow: -18px 0 48px rgba(67, 54, 154, 0.18);
+    display: flex;
+    max-width: calc(100vw - 24px);
+    position: fixed;
+    right: 0;
+    top: 66px;
+    width: 400px;
+    z-index: 12;
+  }
+
+  .step-inspector--empty {
+    display: none;
+  }
+}
+
+@media print {
+  @page {
+    margin: 16mm;
+  }
+
+  html,
+  body,
+  .workspace-shell,
+  .workspace-layout,
+  .workspace-main,
+  .workspace-canvas,
+  .sequence-call-log,
+  .call-log-body,
+  .call-log-main {
+    background: white !important;
+    display: block;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .workspace-header,
+  .workspace-sidebar,
+  .workspace-toolbar,
+  .step-inspector,
+  .call-log-toolbar,
+  .call-log-nav,
+  .import-drop-overlay {
+    display: none !important;
+  }
+
+  .call-log-main {
+    padding: 0;
+  }
+
+  .call-log-card {
+    border: 1px solid var(--line-strong);
+    break-inside: avoid;
+    box-shadow: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

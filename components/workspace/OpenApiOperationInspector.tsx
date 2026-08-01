@@ -1,12 +1,15 @@
 import { ShieldCheck } from "lucide-react";
 import type { ApiCatalogue, OpenApiOperation } from "@/lib/openapi";
+import type { WorkflowRequestBinding } from "@/lib/workflow-detail";
 
 export function OpenApiOperationInspector({
   catalogue,
   operation,
+  requestBindings = [],
 }: {
   catalogue: ApiCatalogue;
   operation: OpenApiOperation;
+  requestBindings?: WorkflowRequestBinding[];
 }) {
   return (
     <section className="resolved-operation">
@@ -41,19 +44,47 @@ export function OpenApiOperationInspector({
 
       {operation.parameters?.length ? (
         <div className="api-contract-group">
-          <h3>Declared parameters</h3>
-          {operation.parameters.map((parameter) => (
-            <article key={`${parameter.location}:${parameter.name}`}>
-              <div>
-                <strong>{parameter.name}</strong>
-                <small>
-                  {parameter.location} · {parameter.required ? "required" : "optional"}
-                </small>
-              </div>
-              {parameter.schema && <code>{parameter.schema}</code>}
-              {parameter.description && <p>{parameter.description}</p>}
-            </article>
-          ))}
+          <h3>Declared parameters versus this step</h3>
+          <div className="parameter-coverage" role="table">
+            <div className="parameter-coverage-heading" role="row">
+              <span role="columnheader">OpenAPI declares</span>
+              <span role="columnheader">This step sends</span>
+            </div>
+            {operation.parameters.map((parameter) => {
+              const target = `${parameter.location}.${parameter.name}`;
+              const binding = requestBindings.find(
+                (candidate) => normalizeTarget(candidate.target) === normalizeTarget(target),
+              );
+              return (
+                <article
+                  className={binding ? "" : "is-unset"}
+                  key={target}
+                  role="row"
+                >
+                  <div role="cell">
+                    <strong>{parameter.name}</strong>
+                    <small>
+                      {parameter.location} · {parameter.required ? "required" : "optional"}
+                      {parameter.schema ? ` · ${parameter.schema}` : ""}
+                    </small>
+                    {parameter.description && <p>{parameter.description}</p>}
+                  </div>
+                  <div role="cell">
+                    {binding ? (
+                      <>
+                        <code>{binding.value}</code>
+                        <small>{binding.target}</small>
+                      </>
+                    ) : (
+                      <span className="parameter-unset">
+                        {parameter.required ? "Required · not set" : "Not set"}
+                      </span>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 
@@ -96,4 +127,8 @@ export function OpenApiOperationInspector({
       <small className="inspector-muted">{catalogue.location}</small>
     </section>
   );
+}
+
+function normalizeTarget(target: string): string {
+  return target.trim().toLowerCase();
 }
