@@ -731,6 +731,7 @@ export function Workspace() {
                 onEdgeSelect={setSelectedEdgeId}
                 mode="flow"
                 layoutScope={workspaceName}
+                catalogues={catalogues}
                 onLayoutChange={(layout) => {
                   if (!embeddedLayout) return;
                   try {
@@ -760,11 +761,17 @@ export function Workspace() {
                 onEdgeSelect={setSelectedEdgeId}
                 mode="chart"
                 layoutScope={workspaceName}
+                catalogues={catalogues}
               />
             ) : view === "sequence" ? (
               <MermaidView
-                chart={workflowToSequence(spec, workflow)}
+                chart={workflowToSequence(spec, workflow, catalogues)}
                 interactiveStepIds={workflow.steps.map((step) => step.stepId)}
+                messageStepIds={[
+                  null,
+                  ...workflow.steps.flatMap((step) => [step.stepId, step.stepId]),
+                  null,
+                ]}
                 selectedStepId={selectedStepId}
                 onStepSelect={(stepId) => {
                   setSelectedStepId(stepId);

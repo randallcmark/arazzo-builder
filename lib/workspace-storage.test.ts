@@ -24,6 +24,29 @@ describe("workspace storage", () => {
               summary: "Say hello",
               resolved: true,
               sourceName: "family",
+              description: "Returns a family greeting.",
+              tags: ["Greeting"],
+              parameters: [
+                {
+                  name: "language",
+                  location: "query",
+                  required: false,
+                  schema: "string",
+                },
+              ],
+              requestBody: {
+                required: false,
+                contentTypes: ["application/json"],
+              },
+              responses: [
+                {
+                  status: "200",
+                  description: "Greeting returned",
+                  contentTypes: ["application/json"],
+                },
+              ],
+              security: ["familyAuth"],
+              servers: ["https://family.example"],
             },
           ],
         },

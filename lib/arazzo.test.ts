@@ -52,8 +52,38 @@ describe("Arazzo document services", () => {
     const spec = result.spec!;
     const workflow = spec.workflows[0];
 
-    expect(workflowToSequence(spec, workflow)).toContain("sequenceDiagram");
-    expect(workflowToSequence(spec, workflow)).toContain("participant node_deel");
+    const sequence = workflowToSequence(spec, workflow, [
+      {
+        sourceName: "deel",
+        title: "Deel API",
+        location: "/openapi.json",
+        operations: [
+          {
+            id: "getPeople",
+            method: "GET",
+            path: "/rest/people",
+            summary: "List people",
+            resolved: true,
+            responses: [
+              {
+                status: "200",
+                description: "People returned",
+                contentTypes: ["application/json"],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    expect(sequence).toContain("sequenceDiagram");
+    expect(sequence).toContain("participant node_deel as Deel API [deel]");
+    expect(sequence).toContain("GET /rest/people · List people");
+    expect(sequence).toContain("query.search = $inputs.worker_email");
+    expect(sequence).toContain("node_deel-->>-Client: 200 · People returned");
+    expect(sequence).toContain("Expects · $statusCode == 200");
+    expect(sequence).toContain("worker_id ← $response.body＃/data/0/id");
+    expect(sequence).toContain("Workflow outputs");
   });
 
   it("accepts an imported Arazzo JSON document", () => {

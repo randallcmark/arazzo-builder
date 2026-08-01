@@ -40,12 +40,20 @@ export function DocumentationView({
             </div>
           </div>
           <div className="property-grid">
-            {Object.entries(workflow.inputs.properties).map(([name, schema]) => (
-              <div className="property-card" key={name}>
-                <code>{name}</code>
-                <span>{schemaDescription(schema)}</span>
-              </div>
-            ))}
+            {Object.entries(workflow.inputs.properties).map(([name, schema]) => {
+              const details = schemaDetails(schema);
+              const required = workflow.inputs?.required?.includes(name);
+              return (
+                <article className="property-card" key={name}>
+                  <div className="property-card-heading">
+                    <code>{name}</code>
+                    <span className="property-type">({details.type})</span>
+                    {required && <small>required</small>}
+                  </div>
+                  <p>{details.description ?? "No description provided."}</p>
+                </article>
+              );
+            })}
           </div>
         </section>
       )}
@@ -136,11 +144,25 @@ export function DocumentationView({
   );
 }
 
-function schemaDescription(schema: unknown): string {
-  if (!schema || typeof schema !== "object") return "Any value";
+function schemaDetails(schema: unknown): {
+  type: string;
+  description?: string;
+} {
+  if (!schema || typeof schema !== "object") return { type: "any" };
   const record = schema as Record<string, unknown>;
-  const type = typeof record.type === "string" ? record.type : "value";
+  const type =
+    typeof record.type === "string"
+      ? record.type
+      : Array.isArray(record.type)
+        ? record.type.filter((value) => typeof value === "string").join(" | ")
+        : typeof record.$ref === "string"
+          ? record.$ref.split("/").at(-1) ?? "object"
+          : "any";
+  const format = typeof record.format === "string" ? record.format : undefined;
   const description =
     typeof record.description === "string" ? record.description : undefined;
-  return description ? `${type} · ${description}` : type;
+  return {
+    type: format ? `${type} · ${format}` : type,
+    ...(description ? { description } : {}),
+  };
 }

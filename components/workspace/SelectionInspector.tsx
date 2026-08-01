@@ -1,12 +1,22 @@
 "use client";
 
-import { ChevronDown, GitBranch } from "lucide-react";
-import type { ArazzoWorkflow } from "@/lib/arazzo";
 import {
-  operationReferenceParts,
-  type ApiCatalogue,
-} from "@/lib/openapi";
+  ArrowRight,
+  Braces,
+  CheckCircle2,
+  ChevronDown,
+  GitBranch,
+} from "lucide-react";
+import type { ArazzoAction, ArazzoStep, ArazzoWorkflow } from "@/lib/arazzo";
+import { resolveStepOperation, type ApiCatalogue } from "@/lib/openapi";
+import {
+  bindingsFromStep,
+  requestContentType,
+  stepRequestBindings,
+  type WorkflowRequestBinding,
+} from "@/lib/workflow-detail";
 import type { WorkflowEdge } from "@/lib/workflow-graph";
+import { OpenApiOperationInspector } from "./OpenApiOperationInspector";
 
 export function SelectionInspector({
   workflow,
@@ -27,9 +37,17 @@ export function SelectionInspector({
 
   if (step) {
     const stepIndex = workflow.steps.indexOf(step);
-    const operationDetails = resolveCatalogueOperation(
+    const operationDetails = resolveStepOperation(
       step.operationId,
+      step.operationPath,
       catalogues,
+    );
+    const requestBindings = stepRequestBindings(step);
+    const dependencies = requestBindings.flatMap((binding) =>
+      binding.expressions.map((expression) => ({
+        expression,
+        target: binding.target,
+      })),
     );
     return (
       <aside className="step-inspector">
@@ -39,56 +57,79 @@ export function SelectionInspector({
           onClose={onClose}
         />
         <div className="inspector-body">
-          <section>
+          <section className="inspector-overview">
             <span>Workflow position</span>
-            <p>
-              Step {String(stepIndex + 1).padStart(2, "0")} of{" "}
-              {String(workflow.steps.length).padStart(2, "0")}
-            </p>
+            <div className="inspector-position">
+              <strong>{String(stepIndex + 1).padStart(2, "0")}</strong>
+              <p>
+                of {String(workflow.steps.length).padStart(2, "0")} calls in
+                <br />
+                {workflow.workflowId}
+              </p>
+            </div>
+            {step.description && <p>{step.description}</p>}
           </section>
+
+          {operationDetails ? (
+            <OpenApiOperationInspector
+              catalogue={operationDetails.catalogue}
+              operation={operationDetails.operation}
+            />
+          ) : (
+            <section>
+              <span>Operation target</span>
+              <code>{step.operationId ?? step.operationPath ?? step.workflowId}</code>
+              <small className="inspector-muted">
+                Connect the referenced OpenAPI document to resolve its HTTP contract.
+              </small>
+            </section>
+          )}
+
           <section>
-            <span>Operation</span>
+            <span>Arazzo invocation</span>
             <code>{step.operationId ?? step.operationPath ?? step.workflowId}</code>
           </section>
-          {operationDetails && (
-            <section className="resolved-operation">
-              <span>Resolved from OpenAPI</span>
-              <strong>
-                {operationDetails.catalogue.title}
-                <small>
-                  sourceDescriptions.{operationDetails.catalogue.sourceName}
-                </small>
-              </strong>
-              <p>{operationDetails.operation.summary}</p>
-              <code>
-                {operationDetails.operation.method}{" "}
-                {operationDetails.operation.path}
-              </code>
-              <small>{operationDetails.catalogue.location}</small>
+
+          {requestBindings.length ? (
+            <section>
+              <span>Request assembled by this step</span>
+              {requestContentType(step) && (
+                <div className="inspector-inline-meta">
+                  <Braces size={13} />
+                  {requestContentType(step)}
+                </div>
+              )}
+              <BindingList bindings={requestBindings} />
+            </section>
+          ) : (
+            <section>
+              <span>Request assembled by this step</span>
+              <p>No Arazzo parameter or request-body overrides are declared.</p>
             </section>
           )}
-          {step.description && (
+
+          {dependencies.length > 0 && (
             <section>
-              <span>Description</span>
-              <p>{step.description}</p>
+              <span>Data dependencies</span>
+              <div className="dependency-list">
+                {dependencies.map((dependency, index) => (
+                  <div key={`${dependency.expression}:${dependency.target}:${index}`}>
+                    <code>{dependency.expression}</code>
+                    <ArrowRight size={12} />
+                    <code>{dependency.target}</code>
+                  </div>
+                ))}
+              </div>
             </section>
           )}
-          {step.successCriteria?.length ? (
+
+          <ResponseHandling step={step} />
+
+          {(step.onSuccess?.length || step.onFailure?.length) && (
             <section>
-              <span>Success criteria</span>
-              {step.successCriteria.map((criterion, index) => (
-                <code key={index}>{criterion.condition}</code>
-              ))}
-            </section>
-          ) : null}
-          {step.outputs && (
-            <section>
-              <span>Outputs</span>
-              {Object.entries(step.outputs).map(([name, expression]) => (
-                <code key={name}>
-                  {name} = {expression}
-                </code>
-              ))}
+              <span>Flow control</span>
+              <ActionList label="On success" actions={step.onSuccess ?? []} />
+              <ActionList label="On failure" actions={step.onFailure ?? []} />
             </section>
           )}
         </div>
@@ -97,6 +138,17 @@ export function SelectionInspector({
   }
 
   if (!selectedEdge) return null;
+  const sourceStep = workflow.steps.find(
+    (step) => step.stepId === selectedEdge.sourceStepId,
+  );
+  const targetStep = workflow.steps.find(
+    (step) => step.stepId === selectedEdge.targetStepId,
+  );
+  const exchangedBindings =
+    sourceStep && targetStep
+      ? bindingsFromStep(targetStep, sourceStep.stepId)
+      : [];
+
   return (
     <aside className="step-inspector link-inspector" key={selectedEdge.id}>
       <InspectorHeader
@@ -118,50 +170,149 @@ export function SelectionInspector({
           </div>
         </section>
 
+        {exchangedBindings.length > 0 && (
+          <section>
+            <span>Exchange between steps</span>
+            <p>
+              Values captured by {sourceStep?.stepId} are injected into the next
+              API request.
+            </p>
+            <BindingList bindings={exchangedBindings} />
+          </section>
+        )}
+
+        {sourceStep?.outputs && (
+          <section>
+            <span>Available source outputs</span>
+            <KeyValueList values={sourceStep.outputs} />
+          </section>
+        )}
+
         {selectedEdge.kind === "implicit" ? (
           <section>
             <span>Implicit progression</span>
             <p>
-              This progression is inferred because these steps are adjacent in
-              the workflow.
+              This route is inferred because the calls are adjacent and no explicit
+              success action overrides their order.
             </p>
           </section>
         ) : (
-          <>
-            {selectedEdge.action?.name && (
-              <section>
-                <span>Action name</span>
-                <p>{selectedEdge.action.name}</p>
-              </section>
-            )}
-            {selectedEdge.action?.criteria?.length ? (
-              <section>
-                <span>Criteria</span>
-                {selectedEdge.action.criteria.map((criterion, index) => (
-                  <code key={index}>{criterion.condition}</code>
-                ))}
-              </section>
-            ) : (
-              <section>
-                <span>Criteria</span>
-                <p>Unconditional action</p>
-              </section>
-            )}
-            {selectedEdge.kind === "retry" && (
-              <section>
-                <span>Retry policy</span>
-                <p>
-                  {selectedEdge.action?.retryLimit ?? 1} attempts
-                  {selectedEdge.action?.retryAfter !== undefined
-                    ? ` · ${selectedEdge.action.retryAfter}s delay`
-                    : ""}
-                </p>
-              </section>
-            )}
-          </>
+          <ActionDetails action={selectedEdge.action} />
+        )}
+
+        {!selectedEdge.targetStepId && workflow.outputs && (
+          <section>
+            <span>Workflow result</span>
+            <KeyValueList values={workflow.outputs} />
+          </section>
         )}
       </div>
     </aside>
+  );
+}
+
+function ResponseHandling({ step }: { step: ArazzoStep }) {
+  return (
+    <section>
+      <span>Response handling</span>
+      {step.successCriteria?.length ? (
+        <div className="criteria-list">
+          {step.successCriteria.map((criterion, index) => (
+            <div key={index}>
+              <CheckCircle2 size={13} />
+              <div>
+                <code>{criterion.condition}</code>
+                {(criterion.type || criterion.context) && (
+                  <small>
+                    {[criterion.type, criterion.context].filter(Boolean).join(" · ")}
+                  </small>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p>No explicit success criteria.</p>
+      )}
+      {step.outputs && (
+        <div className="inspector-subsection">
+          <h3>Captured outputs</h3>
+          <KeyValueList values={step.outputs} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BindingList({ bindings }: { bindings: WorkflowRequestBinding[] }) {
+  return (
+    <div className="binding-list">
+      {bindings.map((binding, index) => (
+        <article key={`${binding.target}:${index}`}>
+          <div>
+            <b>{binding.kind === "body" ? "BODY" : "PARAM"}</b>
+            <code>{binding.target}</code>
+          </div>
+          <code>{binding.value}</code>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function KeyValueList({ values }: { values: Record<string, string> }) {
+  return (
+    <div className="key-value-list">
+      {Object.entries(values).map(([name, expression]) => (
+        <div key={name}>
+          <strong>{name}</strong>
+          <code>{expression}</code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ActionList({ label, actions }: { label: string; actions: ArazzoAction[] }) {
+  if (!actions.length) return null;
+  return (
+    <div className="inspector-subsection">
+      <h3>{label}</h3>
+      {actions.map((action, index) => (
+        <ActionSummary action={action} key={`${action.name ?? action.type}:${index}`} />
+      ))}
+    </div>
+  );
+}
+
+function ActionSummary({ action }: { action: ArazzoAction }) {
+  return (
+    <article className="action-summary">
+      <div>
+        <b>{action.type}</b>
+        <strong>{action.name ?? actionTarget(action)}</strong>
+      </div>
+      <code>{actionTarget(action)}</code>
+      {action.criteria?.map((criterion, index) => (
+        <code key={index}>{criterion.condition}</code>
+      ))}
+      {action.type === "retry" && (
+        <small>
+          {action.retryLimit ?? 1} attempts
+          {action.retryAfter === undefined ? "" : ` · ${action.retryAfter}s delay`}
+        </small>
+      )}
+    </article>
+  );
+}
+
+function ActionDetails({ action }: { action?: ArazzoAction }) {
+  if (!action) return null;
+  return (
+    <section>
+      <span>Declared action</span>
+      <ActionSummary action={action} />
+    </section>
   );
 }
 
@@ -191,22 +342,11 @@ function InspectorHeader({
   );
 }
 
+function actionTarget(action: ArazzoAction) {
+  return action.stepId ?? action.workflowId ?? action.type;
+}
+
 function edgeTitle(edge: WorkflowEdge) {
   if (edge.kind === "implicit") return "Next step";
   return edge.action?.name ?? edge.kind;
-}
-
-function resolveCatalogueOperation(
-  reference: string | undefined,
-  catalogues: ApiCatalogue[],
-) {
-  const parts = operationReferenceParts(reference);
-  if (!parts) return null;
-  const catalogue = catalogues.find(
-    (candidate) => candidate.sourceName === parts.sourceName,
-  );
-  const operation = catalogue?.operations.find(
-    (candidate) => candidate.id === parts.operationId,
-  );
-  return catalogue && operation ? { catalogue, operation } : null;
 }

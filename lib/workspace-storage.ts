@@ -97,8 +97,88 @@ function decodeOperation(value: unknown): OpenApiOperation[] {
       ...(typeof value.sourceTitle === "string"
         ? { sourceTitle: value.sourceTitle }
         : {}),
+      ...(typeof value.description === "string"
+        ? { description: value.description }
+        : {}),
+      ...(stringArray(value.tags).length ? { tags: stringArray(value.tags) } : {}),
+      ...(value.deprecated === true ? { deprecated: true } : {}),
+      ...(decodeParameters(value.parameters).length
+        ? { parameters: decodeParameters(value.parameters) }
+        : {}),
+      ...(decodeRequestBody(value.requestBody)
+        ? { requestBody: decodeRequestBody(value.requestBody)! }
+        : {}),
+      ...(decodeResponses(value.responses).length
+        ? { responses: decodeResponses(value.responses) }
+        : {}),
+      ...(stringArray(value.security).length
+        ? { security: stringArray(value.security) }
+        : {}),
+      ...(stringArray(value.servers).length
+        ? { servers: stringArray(value.servers) }
+        : {}),
     },
   ];
+}
+
+function decodeParameters(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((parameter) => {
+    if (
+      !isRecord(parameter) ||
+      typeof parameter.name !== "string" ||
+      typeof parameter.location !== "string" ||
+      typeof parameter.required !== "boolean"
+    ) {
+      return [];
+    }
+    return [
+      {
+        name: parameter.name,
+        location: parameter.location,
+        required: parameter.required,
+        ...(typeof parameter.description === "string"
+          ? { description: parameter.description }
+          : {}),
+        ...(typeof parameter.schema === "string"
+          ? { schema: parameter.schema }
+          : {}),
+      },
+    ];
+  });
+}
+
+function decodeRequestBody(value: unknown) {
+  if (!isRecord(value) || typeof value.required !== "boolean") return null;
+  return {
+    required: value.required,
+    ...(typeof value.description === "string"
+      ? { description: value.description }
+      : {}),
+    contentTypes: stringArray(value.contentTypes),
+  };
+}
+
+function decodeResponses(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((response) => {
+    if (!isRecord(response) || typeof response.status !== "string") return [];
+    return [
+      {
+        status: response.status,
+        ...(typeof response.description === "string"
+          ? { description: response.description }
+          : {}),
+        contentTypes: stringArray(response.contentTypes),
+      },
+    ];
+  });
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -10,7 +10,13 @@ API workflow documents.
 - Restores the active file, its reset baseline, and browser-local draft when one
   exists.
 - Shows inspection-first Flow, top-down Chart, and developer-facing Sequence
-  projections alongside documentation and YAML views.
+  projections alongside documentation and YAML views. Resolved operations expose
+  their OpenAPI request contract, responses, security, and server details while
+  Arazzo bindings show how inputs and captured outputs move between calls.
+- Frames Sequence calls between a generic initiator, integrating application,
+  and resolved API targets. The initiator/client boundary is explicitly labelled
+  as visualization context because Arazzo declares calls and dependencies, not
+  user-interface actors or internal service behavior.
 - Builds and inserts workflows by dragging or clicking OpenAPI operations onto
   a flow canvas, then refining the selected step in an inspector.
 - Connects named OpenAPI sources from a URL or local YAML/JSON file, enumerates

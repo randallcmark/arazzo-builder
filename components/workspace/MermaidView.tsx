@@ -10,11 +10,13 @@ const MAX_ZOOM = 2.5;
 export function MermaidView({
   chart,
   interactiveStepIds = [],
+  messageStepIds,
   selectedStepId = null,
   onStepSelect,
 }: {
   chart: string;
   interactiveStepIds?: string[];
+  messageStepIds?: Array<string | null>;
   selectedStepId?: string | null;
   onStepSelect?: (stepId: string) => void;
 }) {
@@ -94,7 +96,9 @@ export function MermaidView({
     const messageLabels =
       containerRef.current?.querySelectorAll<SVGElement>(".messageText");
     messageLabels?.forEach((label, index) => {
-      const stepId = interactiveStepIds[Math.floor(index / 2)];
+      const stepId = messageStepIds
+        ? messageStepIds[index]
+        : interactiveStepIds[Math.floor(index / 2)];
       if (!stepId) return;
       label.dataset.stepId = stepId;
       label.setAttribute("role", "button");
@@ -102,7 +106,7 @@ export function MermaidView({
       label.setAttribute("aria-label", `Inspect workflow step ${stepId}`);
       label.classList.toggle("is-selected-message", stepId === selectedStepId);
     });
-  }, [interactiveStepIds, selectedStepId, svg]);
+  }, [interactiveStepIds, messageStepIds, selectedStepId, svg]);
 
   useEffect(() => {
     const viewport = viewportRef.current;

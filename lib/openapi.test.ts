@@ -4,6 +4,7 @@ import {
   canAutoLoadOpenApiReference,
   operationReferenceParts,
   parseOpenApiSource,
+  resolveStepOperation,
 } from "./openapi";
 
 const openApiYaml = `
@@ -11,11 +12,42 @@ openapi: 3.1.0
 info:
   title: Family Payments API
   version: 1.0.0
+servers:
+  - url: https://api.family.example/v1
+security:
+  - bearerAuth: []
 paths:
   /payments:
+    parameters:
+      - name: trace_id
+        in: header
+        required: false
+        schema:
+          type: string
     post:
       operationId: createPayment
       summary: Create a payment
+      description: Creates and schedules a family payment.
+      tags: [Payments]
+      parameters:
+        - name: dry_run
+          in: query
+          required: false
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Payment'
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json: {}
+        '400':
+          description: Invalid payment
   /payments/{paymentId}:
     get:
       operationId: getPayment
@@ -42,6 +74,42 @@ describe("OpenAPI catalogues", () => {
       "createPayment",
       "getPayment",
     ]);
+    expect(catalogue.operations[0]).toMatchObject({
+      description: "Creates and schedules a family payment.",
+      tags: ["Payments"],
+      parameters: [
+        {
+          name: "trace_id",
+          location: "header",
+          required: false,
+          schema: "string",
+        },
+        {
+          name: "dry_run",
+          location: "query",
+          required: false,
+          schema: "boolean",
+        },
+      ],
+      requestBody: {
+        required: true,
+        contentTypes: ["application/json"],
+      },
+      responses: [
+        {
+          status: "201",
+          description: "Payment created",
+          contentTypes: ["application/json"],
+        },
+        {
+          status: "400",
+          description: "Invalid payment",
+          contentTypes: [],
+        },
+      ],
+      security: ["bearerAuth"],
+      servers: ["https://api.family.example/v1"],
+    });
   });
 
   it("parses an Arazzo operation reference", () => {
@@ -54,6 +122,37 @@ describe("OpenAPI catalogues", () => {
       operationId: "createPayment",
     });
     expect(operationReferenceParts("$steps.create.outputs.id")).toBeNull();
+  });
+
+  it("resolves an official-style Arazzo operationPath JSON pointer", () => {
+    const catalogue = buildCatalogue(
+      parseOpenApiSource(openApiYaml),
+      "payments",
+      "./payments.openapi.yaml",
+    );
+
+    expect(
+      resolveStepOperation(
+        undefined,
+        "{$sourceDescriptions.payments.url}#/paths/~1payments/post",
+        [catalogue],
+      )?.operation,
+    ).toMatchObject({ id: "createPayment", method: "POST", path: "/payments" });
+  });
+
+  it("resolves an unqualified operationId when it is unambiguous", () => {
+    const catalogue = buildCatalogue(
+      parseOpenApiSource(openApiYaml),
+      "payments",
+      "./payments.openapi.yaml",
+    );
+
+    expect(
+      resolveStepOperation("createPayment", undefined, [catalogue]),
+    ).toMatchObject({
+      catalogue: { sourceName: "payments" },
+      operation: { id: "createPayment", method: "POST" },
+    });
   });
 
   it("auto-loads only relative or same-origin OpenAPI references", () => {

@@ -18,6 +18,11 @@ import { Braces, Check, Move, Workflow } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import type { ArazzoStep, ArazzoWorkflow } from "@/lib/arazzo";
 import { shortOperation } from "@/lib/arazzo";
+import {
+  resolveStepOperation,
+  type ApiCatalogue,
+  type OpenApiOperation,
+} from "@/lib/openapi";
 import { workflowEdges, type WorkflowEdge } from "@/lib/workflow-graph";
 import {
   defaultWorkflowLayout,
@@ -33,6 +38,7 @@ type FlowNodeData = {
   title: string;
   subtitle: string;
   step?: ArazzoStep;
+  operation?: OpenApiOperation;
 };
 
 function LoomNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
@@ -52,6 +58,12 @@ function LoomNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
       <div>
         <small>{data.subtitle}</small>
         <strong>{data.title}</strong>
+        {vertical && data.operation && (
+          <span className="loom-node-operation">
+            {data.operation.path}
+            <em>{data.operation.summary}</em>
+          </span>
+        )}
       </div>
       <Handle type="source" position={vertical ? Position.Bottom : Position.Right} />
     </div>
@@ -69,6 +81,7 @@ export function FlowView({
   mode = "flow",
   layoutScope,
   onLayoutChange,
+  catalogues = [],
 }: {
   workflow: ArazzoWorkflow;
   selectedStepId: string | null;
@@ -78,6 +91,7 @@ export function FlowView({
   mode?: "flow" | "chart";
   layoutScope: string;
   onLayoutChange?: (layout: WorkflowNodeLayout) => void;
+  catalogues?: ApiCatalogue[];
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>([]);
   const graphEdges = useMemo(() => workflowEdges(workflow), [workflow]);
@@ -95,9 +109,10 @@ export function FlowView({
         mode,
         savedLayout,
         selectedStepId,
+        catalogues,
       ),
     );
-  }, [layoutScope, mode, selectedStepId, setNodes, workflow]);
+  }, [catalogues, layoutScope, mode, selectedStepId, setNodes, workflow]);
 
   const edges = useMemo(
     () =>
@@ -178,6 +193,7 @@ function workflowNodes(
   mode: "flow" | "chart",
   layout: WorkflowNodeLayout,
   selectedStepId: string | null,
+  catalogues: ApiCatalogue[],
 ): Array<Node<FlowNodeData>> {
   const direction: FlowNodeData["direction"] =
     mode === "chart" ? "vertical" : "horizontal";
@@ -198,31 +214,42 @@ function workflowNodes(
       },
       selectable: false,
     },
-    ...workflow.steps.map((step, index) => ({
-      id: step.stepId,
-      type: "loom",
-      position:
-        layout[step.stepId] ??
-        (mode === "chart"
-          ? { x: chartX, y: 165 + index * 145 }
-          : { x: 310 + index * 280, y: 110 + (index % 2) * 100 }),
-      data: {
-        kind: "step" as const,
-        direction,
-        title: step.stepId,
-        subtitle: `${String(index + 1).padStart(2, "0")} · ${shortOperation(
-          step.operationId ?? step.operationPath ?? step.workflowId ?? "Operation",
-        )}`,
-        step,
-      },
-      selected: selectedStepId === step.stepId,
-    })),
+    ...workflow.steps.map((step, index) => {
+      const operation = resolveStepOperation(
+        step.operationId,
+        step.operationPath,
+        catalogues,
+      )?.operation;
+      return {
+        id: step.stepId,
+        type: "loom",
+        position:
+          layout[step.stepId] ??
+          (mode === "chart"
+            ? { x: chartX, y: 165 + index * 185 }
+            : { x: 310 + index * 280, y: 110 + (index % 2) * 100 }),
+        data: {
+          kind: "step" as const,
+          direction,
+          title: step.stepId,
+          subtitle: `${String(index + 1).padStart(2, "0")} · ${
+            operation?.method ??
+            shortOperation(
+              step.operationId ?? step.operationPath ?? step.workflowId ?? "Operation",
+            )
+          }`,
+          step,
+          ...(operation ? { operation } : {}),
+        },
+        selected: selectedStepId === step.stepId,
+      };
+    }),
     {
       id: "output",
       type: "loom",
       position:
         mode === "chart"
-          ? { x: chartX, y: 165 + workflow.steps.length * 145 }
+          ? { x: chartX, y: 165 + workflow.steps.length * 185 }
           : layout.output ?? {
               x: 310 + workflow.steps.length * 280,
               y: 165,

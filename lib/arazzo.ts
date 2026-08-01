@@ -4,6 +4,14 @@ import {
   parseDocument,
   type Document,
 } from "yaml";
+import {
+  resolveStepOperation,
+  type ApiCatalogue,
+} from "./openapi";
+import {
+  requestContentType,
+  stepRequestBindings,
+} from "./workflow-detail";
 
 export type ArazzoSource = {
   name: string;
@@ -16,9 +24,15 @@ export type ArazzoAction = {
   type: "goto" | "end" | "retry" | string;
   stepId?: string;
   workflowId?: string;
-  criteria?: Array<{ condition?: string }>;
+  criteria?: ArazzoCriterion[];
   retryAfter?: number;
   retryLimit?: number;
+};
+
+export type ArazzoCriterion = {
+  condition?: string;
+  type?: string;
+  context?: string;
 };
 
 export type ArazzoStep = {
@@ -29,7 +43,7 @@ export type ArazzoStep = {
   workflowId?: string;
   parameters?: Array<{ name?: string; in?: string; value?: unknown }>;
   requestBody?: unknown;
-  successCriteria?: Array<{ condition?: string }>;
+  successCriteria?: ArazzoCriterion[];
   outputs?: Record<string, string>;
   onSuccess?: ArazzoAction[];
   onFailure?: ArazzoAction[];
@@ -417,32 +431,185 @@ function workflowStepNode(
 export function workflowToSequence(
   _spec: ArazzoSpec,
   workflow: ArazzoWorkflow,
+  catalogues: ApiCatalogue[] = [],
 ): string {
   const participants = new Set<string>();
   for (const step of workflow.steps) {
-    participants.add(sourceForStep(step) || "API");
+    participants.add(participantForStep(step, catalogues));
   }
 
-  const lines = ["sequenceDiagram", "  autonumber", "  participant User"];
+  const lines = [
+    "sequenceDiagram",
+    "  autonumber",
+    "  box Workflow context",
+    "    actor Initiator as Initiator",
+    "    participant Client as Integrating application",
+    "  end",
+    "  box Service and workflow targets",
+  ];
   for (const participant of participants) {
-    lines.push(`  participant ${safeId(participant)} as ${safeLabel(participant)}`);
+    const catalogue = catalogues.find(
+      (candidate) => candidate.sourceName === participant,
+    );
+    const label = catalogue
+      ? `${catalogue.title} [${catalogue.sourceName}]`
+      : participant;
+    lines.push(`    participant ${safeId(participant)} as ${safeLabel(label)}`);
   }
-  lines.push(`  Note over User: ${safeLabel(workflow.summary ?? workflow.workflowId)}`);
+  lines.push("  end");
+  lines.push(
+    "  Note over Initiator,Client: Context lane is inferred from the workflow boundary — API exchanges are declared by Arazzo",
+  );
+  lines.push(
+    `  Initiator-->>Client: Start · ${safeLabel(workflow.summary ?? workflow.workflowId)}`,
+  );
+  const inputs = workflowInputLines(workflow);
+  if (inputs.length) {
+    lines.push(
+      `  Note over Initiator,Client: ${safeMultilineLabel(["Workflow inputs", ...inputs])}`,
+    );
+  }
 
-  for (const step of workflow.steps) {
-    const sourceName = sourceForStep(step) || "API";
+  for (const [index, step] of workflow.steps.entries()) {
+    const sourceName = participantForStep(step, catalogues);
     const target = safeId(sourceName);
     const operation = step.operationId ?? step.operationPath ?? step.workflowId ?? step.stepId;
-    lines.push(`  User->>+${target}: ${safeLabel(shortOperation(operation))}`);
-    const criterion = step.successCriteria?.[0]?.condition ?? "Response";
-    lines.push(`  ${target}-->>-User: ${safeLabel(criterion)}`);
-    if (step.outputs && Object.keys(step.outputs).length) {
+    const resolved = resolveStepOperation(
+      step.operationId,
+      step.operationPath,
+      catalogues,
+    );
+    const requestLabel = resolved
+      ? `${resolved.operation.method} ${resolved.operation.path} · ${resolved.operation.summary}`
+      : shortOperation(operation);
+    const stepHeading = [
+      `Step ${String(index + 1).padStart(2, "0")} · ${step.stepId}`,
+      step.description ?? resolved?.operation.description ?? resolved?.operation.summary,
+    ].filter((value): value is string => Boolean(value));
+    lines.push(
+      `  Note right of Client: ${safeMultilineLabel(stepHeading)}`,
+    );
+
+    const bindings = stepRequestBindings(step);
+    if (bindings.length) {
+      const visibleBindings = bindings
+        .slice(0, 8)
+        .map((binding) => `${binding.target} = ${binding.value}`);
+      if (bindings.length > visibleBindings.length) {
+        visibleBindings.push(`+${bindings.length - visibleBindings.length} more bindings`);
+      }
+      const contentType = requestContentType(step);
       lines.push(
-        `  Note right of User: ${safeLabel(Object.keys(step.outputs).join(", "))}`,
+        `  Note over Client,${target}: ${safeMultilineLabel([
+          contentType ? `Sends · ${contentType}` : "Request bindings",
+          ...visibleBindings,
+        ])}`,
+      );
+    }
+
+    lines.push(`  Client->>+${target}: ${safeLabel(requestLabel)}`);
+    const criteria = (step.successCriteria ?? [])
+      .map((criterion) => criterion.condition)
+      .filter((condition): condition is string => Boolean(condition));
+    const status = statusCodeFromCriteria(criteria);
+    const response = resolved?.operation.responses?.find(
+      (candidate) => candidate.status === status,
+    );
+    const responseLabel = status
+      ? `${status}${response?.description ? ` · ${response.description}` : ""}`
+      : "Response";
+    lines.push(`  ${target}-->>-Client: ${safeLabel(responseLabel)}`);
+    const responseDetails = [
+      ...criteria.map((criterion) => `Expects · ${criterion}`),
+      ...Object.entries(step.outputs ?? {}).map(
+        ([name, expression]) => `Captures · ${name} ← ${expression}`,
+      ),
+    ];
+    if (responseDetails.length) {
+      lines.push(
+        `  Note over Client,${target}: ${safeMultilineLabel(responseDetails)}`,
+      );
+    }
+    const transitions = transitionLines(step);
+    if (transitions.length) {
+      lines.push(
+        `  Note over Client,${target}: ${safeMultilineLabel(transitions)}`,
       );
     }
   }
+
+  if (workflow.outputs && Object.keys(workflow.outputs).length) {
+    lines.push(
+      `  Note over Initiator,Client: ${safeMultilineLabel([
+        "Workflow outputs",
+        ...Object.entries(workflow.outputs).map(
+          ([name, expression]) => `${name} ← ${expression}`,
+        ),
+      ])}`,
+    );
+  }
+  const outcome = Object.keys(workflow.outputs ?? {});
+  lines.push(
+    `  Client-->>Initiator: Complete · ${safeLabel(
+      outcome.length ? outcome.join(", ") : workflow.workflowId,
+    )}`,
+  );
   return lines.join("\n");
+}
+
+function participantForStep(
+  step: ArazzoStep,
+  catalogues: ApiCatalogue[],
+): string {
+  return (
+    sourceForStep(step) ??
+    resolveStepOperation(step.operationId, step.operationPath, catalogues)?.catalogue
+      .sourceName ??
+    (step.workflowId ? "Workflow" : "API")
+  );
+}
+
+function workflowInputLines(workflow: ArazzoWorkflow): string[] {
+  const required = new Set(workflow.inputs?.required ?? []);
+  return Object.entries(workflow.inputs?.properties ?? {}).map(([name, value]) => {
+    const property =
+      typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)
+        : {};
+    const type = typeof property.type === "string" ? ` · ${property.type}` : "";
+    return `${name}${type}${required.has(name) ? " · required" : " · optional"}`;
+  });
+}
+
+function statusCodeFromCriteria(criteria: string[]): string | undefined {
+  for (const condition of criteria) {
+    const match = condition.match(/\$statusCode\s*={2,3}\s*['"]?(\d{3})/);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
+function transitionLines(step: ArazzoStep): string[] {
+  const describe = (channel: "success" | "failure", action: ArazzoAction) => {
+    const target = action.stepId ?? action.workflowId ?? action.type;
+    const policy =
+      action.type === "retry"
+        ? ` · ${action.retryLimit ?? 1} attempts${
+            action.retryAfter === undefined ? "" : ` · ${action.retryAfter}s delay`
+          }`
+        : "";
+    const criteria = (action.criteria ?? [])
+      .map((criterion) => criterion.condition)
+      .filter(Boolean)
+      .join(" AND ");
+    return `On ${channel}: ${action.name ?? action.type} -> ${target}${policy}${
+      criteria ? ` · when ${criteria}` : ""
+    }`;
+  };
+  return [
+    ...(step.onSuccess ?? []).map((action) => describe("success", action)),
+    ...(step.onFailure ?? []).map((action) => describe("failure", action)),
+  ];
 }
 
 export function sourceForStep(step: ArazzoStep): string | null {
@@ -462,10 +629,22 @@ function safeId(value: string): string {
 
 function safeLabel(value: string): string {
   return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/[<>]/g, "")
-    .replace(/\n/g, " ");
+    .replace(/<=/g, "≤")
+    .replace(/>=/g, "≥")
+    .replace(/</g, "‹")
+    .replace(/>/g, "›")
+    // Mermaid sequence labels treat semicolons as statement terminators and
+    // hashes as comments. Named HTML entities therefore break otherwise valid
+    // JSON (for example, &quot;), so use readable Unicode equivalents instead.
+    .replace(/&/g, "＆")
+    .replace(/"/g, "″")
+    .replace(/#/g, "＃")
+    .replace(/;/g, "；")
+    .replace(/[\r\n\u2028\u2029]+/g, " ");
+}
+
+function safeMultilineLabel(values: string[]): string {
+  return values.map(safeLabel).join("<br/>");
 }
 
 function workspaceShapeDiagnostics(value: unknown): Diagnostic[] {
