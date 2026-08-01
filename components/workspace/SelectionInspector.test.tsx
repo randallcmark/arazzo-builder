@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArazzoWorkflow } from "@/lib/arazzo";
 import type { ApiCatalogue } from "@/lib/openapi";
@@ -78,29 +79,93 @@ const catalogues: ApiCatalogue[] = [
   },
 ];
 
+const source = `
+arazzo: 1.0.1
+info:
+  title: Records
+  version: "1.0"
+sourceDescriptions:
+  - name: family
+    url: /family.openapi.json
+workflows:
+  - workflowId: create-and-check
+    steps:
+      - stepId: create
+        operationId: $sourceDescriptions.family.createRecord
+      - stepId: check
+        operationId: $sourceDescriptions.family.getRecord
+`;
+
+function renderInspector(overrides: Partial<Parameters<typeof SelectionInspector>[0]> = {}) {
+  const onSelectStep = vi.fn();
+  const onCopy = vi.fn();
+  const onClose = vi.fn();
+  render(
+    <SelectionInspector
+      workflow={workflow}
+      source={source}
+      selectedStepId="create"
+      selectedEdge={null}
+      catalogues={catalogues}
+      onSelectStep={onSelectStep}
+      onCopy={onCopy}
+      onClose={onClose}
+      {...overrides}
+    />,
+  );
+  return { onSelectStep, onCopy, onClose };
+}
+
 describe("selection inspector", () => {
   afterEach(cleanup);
 
-  it("unpicks the selected Arazzo step and resolved OpenAPI operation", () => {
-    render(
-      <SelectionInspector
-        workflow={workflow}
-        selectedStepId="create"
-        selectedEdge={null}
-        catalogues={catalogues}
-        onClose={vi.fn()}
-      />,
-    );
+  it("shows the resolved OpenAPI contract on the default Contract tab", () => {
+    renderInspector();
 
     expect(screen.getByRole("heading", { name: "create" })).toBeTruthy();
+    expect(screen.getByText("Step 01 of 02")).toBeTruthy();
     expect(screen.getByText("POST")).toBeTruthy();
     expect(screen.getByText("/records")).toBeTruthy();
     expect(screen.getByText("Idempotency-Key")).toBeTruthy();
-    expect(screen.getAllByText("$inputs.title")).toHaveLength(2);
     expect(screen.getByText("$statusCode == 201")).toBeTruthy();
-    expect(screen.getByText("record_id")).toBeTruthy();
     expect(screen.getByText("bearerAuth")).toBeTruthy();
+  });
+
+  it("shows request bindings, dependencies, and captured outputs on the Data tab", async () => {
+    const user = userEvent.setup();
+    renderInspector();
+
+    await user.click(screen.getByRole("tab", { name: "Data" }));
+
+    expect(screen.getAllByText("$inputs.title")).toHaveLength(2);
+    expect(screen.getByText("record_id")).toBeTruthy();
+  });
+
+  it("shows onSuccess/onFailure actions on the Control flow tab", async () => {
+    const user = userEvent.setup();
+    renderInspector();
+
+    await user.click(screen.getByRole("tab", { name: "Control flow" }));
+
     expect(screen.getByText("3 attempts · 2s delay")).toBeTruthy();
+  });
+
+  it("shows a read-only YAML snippet on the YAML tab", async () => {
+    const user = userEvent.setup();
+    renderInspector();
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+
+    expect(screen.getByText(/operationId: \$sourceDescriptions\.family\.createRecord/)).toBeTruthy();
+  });
+
+  it("navigates to the next and previous step", async () => {
+    const user = userEvent.setup();
+    const { onSelectStep } = renderInspector();
+
+    expect(screen.getByRole("button", { name: "Previous step" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "Next step" }));
+    expect(onSelectStep).toHaveBeenCalledWith("check");
   });
 
   it("shows values exchanged across a selected chart link", () => {
@@ -112,15 +177,7 @@ describe("selection inspector", () => {
       targetStepId: "check",
       kind: "implicit",
     };
-    render(
-      <SelectionInspector
-        workflow={workflow}
-        selectedStepId={null}
-        selectedEdge={edge}
-        catalogues={catalogues}
-        onClose={vi.fn()}
-      />,
-    );
+    renderInspector({ selectedStepId: null, selectedEdge: edge });
 
     expect(screen.getByText("Exchange between steps")).toBeTruthy();
     expect(screen.getByText("path.record_id")).toBeTruthy();

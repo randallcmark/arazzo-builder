@@ -15,12 +15,12 @@ import {
   FileCode2,
   FolderOpen,
   GitBranch,
+  LayoutGrid,
   ListTree,
   Plus,
   Redo2,
   RotateCcw,
   Save,
-  Share2,
   Undo2,
 } from "lucide-react";
 import {
@@ -38,7 +38,6 @@ import {
   parseArazzo,
   setWorkflowLayoutExtension,
   upsertSourceDescription,
-  workflowToSequence,
   type ArazzoWorkflow,
 } from "@/lib/arazzo";
 import { loadCataloguesForSpec } from "@/lib/api-catalogues";
@@ -57,15 +56,14 @@ import {
 import { AddWorkflowDialog } from "./AddWorkflowDialog";
 import { ApiSourceDialog } from "./ApiSourceDialog";
 import { DocumentationView } from "./DocumentationView";
-import { FlowView } from "./FlowView";
-import { MermaidView } from "./MermaidView";
+import { FlowView, type GraphLayoutMode } from "./FlowView";
 import { SelectionInspector } from "./SelectionInspector";
-import { SequenceStepBubble } from "./SequenceStepBubble";
+import { SequenceView, type SequenceDensity } from "./SequenceView";
 import { YamlWorkspacePanel } from "./YamlWorkspacePanel";
 import { useDocumentHistory } from "./useDocumentHistory";
 import { useWorkspaceDraft } from "./useWorkspaceDraft";
 
-type ViewMode = "flow" | "flowchart" | "sequence" | "docs" | "yaml";
+type ViewMode = "graph" | "sequence" | "docs" | "yaml";
 
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
@@ -74,11 +72,21 @@ const viewOptions: Array<{
   label: string;
   icon: typeof GitBranch;
 }> = [
-  { id: "flow", label: "Flow", icon: GitBranch },
-  { id: "flowchart", label: "Chart", icon: Share2 },
+  { id: "graph", label: "Graph", icon: GitBranch },
   { id: "sequence", label: "Sequence", icon: ListTree },
   { id: "docs", label: "Docs", icon: FileCode2 },
   { id: "yaml", label: "YAML", icon: Braces },
+];
+
+const graphLayoutOptions: Array<{ id: GraphLayoutMode; label: string }> = [
+  { id: "freeform", label: "Freeform" },
+  { id: "topdown", label: "Top-down" },
+  { id: "byapi", label: "By API" },
+];
+
+const sequenceDensityOptions: Array<{ id: SequenceDensity; label: string }> = [
+  { id: "diagram", label: "Diagram" },
+  { id: "callLog", label: "Call log" },
 ];
 
 export function Workspace() {
@@ -106,7 +114,9 @@ export function Workspace() {
     resetSource,
     onStatus: setStatus,
   });
-  const [view, setView] = useState<ViewMode>("flow");
+  const [view, setView] = useState<ViewMode>("graph");
+  const [graphLayout, setGraphLayout] = useState<GraphLayoutMode>("freeform");
+  const [sequenceDensity, setSequenceDensity] = useState<SequenceDensity>("diagram");
   const [activeWorkflowId, setActiveWorkflowId] = useState("");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -155,10 +165,6 @@ export function Workspace() {
   );
   const selectedEdge =
     graphEdges.find((edge) => edge.id === selectedEdgeId) ?? null;
-  const selectedSequenceStep =
-    view === "sequence"
-      ? workflow?.steps.find((step) => step.stepId === selectedStepId) ?? null
-      : null;
   const embeddedLayout = workflow ? embeddedWorkflowLayout(workflow) : null;
   useEffect(
     () => () => {
@@ -236,7 +242,7 @@ export function Workspace() {
           (diagnostic) => diagnostic.severity === "error",
         )
           ? "yaml"
-          : "flow",
+          : "graph",
       );
 
       const loadedCatalogues = await loadCataloguesForSpec(importedResult.spec);
@@ -323,7 +329,7 @@ export function Workspace() {
       setSelectedStepId(null);
       setSelectedEdgeId(null);
       setBuilderOpen(false);
-      setView("flow");
+      setView("graph");
       setStatus(`Inserted ${newWorkflow.workflowId}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to insert workflow.");
@@ -430,14 +436,6 @@ export function Workspace() {
     );
   }, [source, selectedStepId, view, workflow]);
 
-  const selectView = (nextView: ViewMode) => {
-    if (nextView === "sequence" || view === "sequence") {
-      setSelectedStepId(null);
-      setSelectedEdgeId(null);
-    }
-    setView(nextView);
-  };
-
   const handleViewTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
     currentView: ViewMode,
@@ -456,7 +454,7 @@ export function Workspace() {
     if (nextIndex === null) return;
     event.preventDefault();
     const nextView = viewOptions[nextIndex].id;
-    selectView(nextView);
+    setView(nextView);
     window.requestAnimationFrame(() =>
       document.getElementById(`workspace-tab-${nextView}`)?.focus(),
     );
@@ -625,23 +623,62 @@ export function Workspace() {
 
         <section className="workspace-main">
           <div className="workspace-toolbar">
-            <div className="view-tabs" role="tablist" aria-label="Workspace view">
-              {viewOptions.map(({ id, label, icon: Icon }) => (
-                <button
-                  role="tab"
-                  aria-selected={view === id}
-                  aria-controls="workspace-view-panel"
-                  id={`workspace-tab-${id}`}
-                  tabIndex={view === id ? 0 : -1}
-                  className={view === id ? "is-active" : ""}
-                  key={id}
-                  onClick={() => selectView(id)}
-                  onKeyDown={(event) => handleViewTabKeyDown(event, id)}
-                >
-                  <Icon size={15} />
-                  {label}
-                </button>
-              ))}
+            <div className="toolbar-tab-cluster">
+              <div className="view-tabs" role="tablist" aria-label="Workspace view">
+                {viewOptions.map(({ id, label, icon: Icon }) => (
+                  <button
+                    role="tab"
+                    aria-selected={view === id}
+                    aria-controls="workspace-view-panel"
+                    id={`workspace-tab-${id}`}
+                    tabIndex={view === id ? 0 : -1}
+                    className={view === id ? "is-active" : ""}
+                    key={id}
+                    onClick={() => setView(id)}
+                    onKeyDown={(event) => handleViewTabKeyDown(event, id)}
+                  >
+                    <Icon size={15} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {view === "graph" && (
+                <>
+                  <span className="toolbar-divider" />
+                  <div className="mode-switch" role="tablist" aria-label="Graph layout">
+                    <LayoutGrid size={12} className="mode-switch-icon" />
+                    {graphLayoutOptions.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        role="tab"
+                        aria-selected={graphLayout === id}
+                        className={graphLayout === id ? "is-active" : ""}
+                        onClick={() => setGraphLayout(id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              {view === "sequence" && (
+                <>
+                  <span className="toolbar-divider" />
+                  <div className="mode-switch" role="tablist" aria-label="Sequence density">
+                    {sequenceDensityOptions.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        role="tab"
+                        aria-selected={sequenceDensity === id}
+                        className={sequenceDensity === id ? "is-active" : ""}
+                        onClick={() => setSequenceDensity(id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
             <div className="workspace-toolbar-actions">
               <button
@@ -730,14 +767,15 @@ export function Workspace() {
                   Open YAML
                 </button>
               </div>
-            ) : view === "flow" ? (
+            ) : view === "graph" ? (
               <FlowView
                 workflow={workflow}
+                spec={spec}
                 selectedStepId={selectedStepId}
                 selectedEdgeId={selectedEdgeId}
                 onStepSelect={setSelectedStepId}
                 onEdgeSelect={setSelectedEdgeId}
-                mode="flow"
+                mode={graphLayout}
                 layoutScope={workspaceName}
                 catalogues={catalogues}
                 onLayoutChange={(layout) => {
@@ -760,41 +798,19 @@ export function Workspace() {
                   }
                 }}
               />
-            ) : view === "flowchart" ? (
-              <FlowView
-                workflow={workflow}
-                selectedStepId={selectedStepId}
-                selectedEdgeId={selectedEdgeId}
-                onStepSelect={setSelectedStepId}
-                onEdgeSelect={setSelectedEdgeId}
-                mode="chart"
-                layoutScope={workspaceName}
-                catalogues={catalogues}
-              />
             ) : view === "sequence" ? (
-              <MermaidView
-                chart={workflowToSequence(spec, workflow, catalogues)}
-                interactiveStepIds={workflow.steps.map((step) => step.stepId)}
-                messageStepIds={[
-                  null,
-                  ...workflow.steps.flatMap((step) => [step.stepId, step.stepId]),
-                  null,
-                ]}
+              <SequenceView
+                spec={spec}
+                workflow={workflow}
+                catalogues={catalogues}
+                density={sequenceDensity}
                 selectedStepId={selectedStepId}
                 onStepSelect={(stepId) => {
                   setSelectedStepId(stepId);
                   setSelectedEdgeId(null);
                 }}
-                onStepClear={() => setSelectedStepId(null)}
-                detailBubble={
-                  selectedSequenceStep ? (
-                    <SequenceStepBubble
-                      workflow={workflow}
-                      step={selectedSequenceStep}
-                      catalogues={catalogues}
-                      onClose={() => setSelectedStepId(null)}
-                    />
-                  ) : null
+                onCopyMarkdown={(markdown) =>
+                  void copyText(markdown, "Call log copied as Markdown")
                 }
               />
             ) : view === "docs" ? (
@@ -808,12 +824,16 @@ export function Workspace() {
 
         {workflow &&
           (selectedStepId || selectedEdge) &&
-          ["flow", "flowchart"].includes(view) && (
+          ["graph", "sequence"].includes(view) && (
             <SelectionInspector
+              key={selectedStepId ?? selectedEdge?.id ?? "inspector"}
               workflow={workflow}
+              source={source}
               selectedStepId={selectedStepId}
               selectedEdge={selectedEdge}
               catalogues={catalogues}
+              onSelectStep={setSelectedStepId}
+              onCopy={(value, message) => void copyText(value, message)}
               onClose={() => {
                 setSelectedStepId(null);
                 setSelectedEdgeId(null);

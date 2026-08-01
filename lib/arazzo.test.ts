@@ -8,7 +8,6 @@ import {
   parseArazzo,
   setWorkflowLayoutExtension,
   upsertSourceDescription,
-  workflowToSequence,
   type ArazzoWorkflow,
 } from "./arazzo";
 
@@ -45,45 +44,6 @@ describe("Arazzo document services", () => {
     expect(result.spec?.workflows).toHaveLength(3);
     expect(result.spec?.workflows[0].workflowId).toBe("find-worker-contracts");
     expect(result.spec?.workflows[2].workflowId).toBe("list-time-off");
-  });
-
-  it("generates a sequence diagram from a workflow", () => {
-    const result = parseArazzo(starter);
-    const spec = result.spec!;
-    const workflow = spec.workflows[0];
-
-    const sequence = workflowToSequence(spec, workflow, [
-      {
-        sourceName: "deel",
-        title: "Deel API",
-        location: "/openapi.json",
-        operations: [
-          {
-            id: "getPeople",
-            method: "GET",
-            path: "/rest/people",
-            summary: "List people",
-            resolved: true,
-            responses: [
-              {
-                status: "200",
-                description: "People returned",
-                contentTypes: ["application/json"],
-              },
-            ],
-          },
-        ],
-      },
-    ]);
-
-    expect(sequence).toContain("sequenceDiagram");
-    expect(sequence).toContain("participant node_deel as Deel API [deel]");
-    expect(sequence).toContain("GET /rest/people · List people");
-    expect(sequence).toContain("query.search ← input · worker_email");
-    expect(sequence).toContain("node_deel-->>-Client: 200 · People returned");
-    expect(sequence).toContain("Expects · $statusCode == 200");
-    expect(sequence).toContain("worker_id ← response body · /data/0/id");
-    expect(sequence).toContain("Workflow outputs");
   });
 
   it("accepts an imported Arazzo JSON document", () => {
@@ -263,13 +223,4 @@ workflows:
     });
   });
 
-  it("does not copy source URLs into generated Mermaid", () => {
-    const spec = parseArazzo(starter).spec!;
-    spec.sourceDescriptions[0].url =
-      "https://example.com/openapi.json\nparticipant Injected";
-
-    const sequence = workflowToSequence(spec, spec.workflows[0]);
-    expect(sequence).not.toContain("https://example.com");
-    expect(sequence).not.toContain("participant Injected");
-  });
 });

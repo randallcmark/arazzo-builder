@@ -52,18 +52,18 @@ vi.mock("./FlowView", () => ({
     </div>
   ),
 }));
-vi.mock("./MermaidView", () => ({
-  MermaidView: ({
+vi.mock("./SequenceView", () => ({
+  SequenceView: ({
+    selectedStepId,
     onStepSelect,
-    detailBubble,
   }: {
+    selectedStepId: string | null;
     onStepSelect: (stepId: string) => void;
-    detailBubble?: React.ReactNode;
   }) => (
     <div>
       Sequence projection
       <button onClick={() => onStepSelect("find-worker")}>Select sequence call</button>
-      {detailBubble}
+      <span data-testid="sequence-selected-step">{selectedStepId ?? "none"}</span>
     </div>
   ),
 }));
@@ -148,7 +148,7 @@ describe("Workspace recovery", () => {
     expect((editor as HTMLTextAreaElement).value).toBe(malformedSource);
 
     fireEvent.change(editor, { target: { value: publishedSource } });
-    await user.click(screen.getByRole("tab", { name: "Flow" }));
+    await user.click(screen.getByRole("tab", { name: "Graph" }));
 
     expect(await screen.findByTestId("flow-view")).toBeTruthy();
   });
@@ -237,7 +237,7 @@ describe("Workspace recovery", () => {
     expect(screen.getByText("legacy-draft.yml")).toBeTruthy();
   });
 
-  it("scopes sequence selection to a dismissible diagram bubble", async () => {
+  it("keeps the selected step when switching between Graph and Sequence", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
     render(<Workspace />);
@@ -247,16 +247,12 @@ describe("Workspace recovery", () => {
     expect(screen.getByText("Selected step inspector")).toBeTruthy();
 
     await user.click(screen.getByRole("tab", { name: "Sequence" }));
-    expect(screen.queryByText("Selected step inspector")).toBeNull();
-    expect(screen.queryByRole("dialog", { name: /Sequence details/ })).toBeNull();
+    expect(screen.getByTestId("sequence-selected-step").textContent).toBe(
+      "find-worker",
+    );
+    expect(screen.getByText("Selected step inspector")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Select sequence call" }));
-    expect(
-      screen.getByRole("dialog", { name: "Sequence details for find-worker" }),
-    ).toBeTruthy();
-    expect(screen.queryByText("Selected step inspector")).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Close sequence details" }));
-    expect(screen.queryByRole("dialog", { name: /Sequence details/ })).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Graph" }));
+    expect(screen.getByText("Selected step inspector")).toBeTruthy();
   });
 });
