@@ -429,36 +429,29 @@ function workflowStepNode(
 }
 
 export function workflowToSequence(
-  _spec: ArazzoSpec,
+  spec: ArazzoSpec,
   workflow: ArazzoWorkflow,
   catalogues: ApiCatalogue[] = [],
 ): string {
-  const participants = new Set<string>();
+  const participants = new Map<string, SequenceParticipant>();
   for (const step of workflow.steps) {
-    participants.add(participantForStep(step, catalogues));
+    const participant = participantForStep(spec, step, catalogues);
+    participants.set(participant.key, participant);
   }
 
   const lines = [
     "sequenceDiagram",
     "  autonumber",
-    "  box Workflow context",
-    "    actor Initiator as Initiator",
-    "    participant Client as Integrating application",
-    "  end",
-    "  box Service and workflow targets",
+    "  actor Initiator as Initiator",
+    "  participant Client as Integrating application",
   ];
-  for (const participant of participants) {
-    const catalogue = catalogues.find(
-      (candidate) => candidate.sourceName === participant,
+  for (const participant of participants.values()) {
+    lines.push(
+      `  participant ${safeId(participant.key)} as ${safeLabel(participant.label)}`,
     );
-    const label = catalogue
-      ? `${catalogue.title} [${catalogue.sourceName}]`
-      : participant;
-    lines.push(`    participant ${safeId(participant)} as ${safeLabel(label)}`);
   }
-  lines.push("  end");
   lines.push(
-    "  Note over Initiator,Client: Context lane is inferred from the workflow boundary — API exchanges are declared by Arazzo",
+    "  Note right of Client: Initiator and client are visualization context",
   );
   lines.push(
     `  Initiator-->>Client: Start · ${safeLabel(workflow.summary ?? workflow.workflowId)}`,
@@ -466,46 +459,53 @@ export function workflowToSequence(
   const inputs = workflowInputLines(workflow);
   if (inputs.length) {
     lines.push(
-      `  Note over Initiator,Client: ${safeMultilineLabel(["Workflow inputs", ...inputs])}`,
+      `  Note right of Client: ${safeMultilineLabel(["Workflow inputs", ...inputs])}`,
     );
   }
 
   for (const [index, step] of workflow.steps.entries()) {
-    const sourceName = participantForStep(step, catalogues);
-    const target = safeId(sourceName);
+    const participant = participantForStep(spec, step, catalogues);
+    const target = safeId(participant.key);
     const operation = step.operationId ?? step.operationPath ?? step.workflowId ?? step.stepId;
     const resolved = resolveStepOperation(
       step.operationId,
       step.operationPath,
       catalogues,
     );
-    const requestLabel = resolved
-      ? `${resolved.operation.method} ${resolved.operation.path} · ${resolved.operation.summary}`
-      : shortOperation(operation);
-    const stepHeading = [
+    const nestedWorkflow = step.workflowId
+      ? spec.workflows.find((candidate) => candidate.workflowId === step.workflowId)
+      : undefined;
+    const requestLabel = nestedWorkflow
+      ? `Run workflow · ${nestedWorkflow.summary ?? nestedWorkflow.workflowId}`
+      : resolved
+        ? `${resolved.operation.method} ${resolved.operation.path} · ${resolved.operation.summary}`
+        : shortOperation(operation);
+    const callDetails = [
       `Step ${String(index + 1).padStart(2, "0")} · ${step.stepId}`,
       step.description ?? resolved?.operation.description ?? resolved?.operation.summary,
     ].filter((value): value is string => Boolean(value));
-    lines.push(
-      `  Note right of Client: ${safeMultilineLabel(stepHeading)}`,
-    );
 
     const bindings = stepRequestBindings(step);
     if (bindings.length) {
       const visibleBindings = bindings
         .slice(0, 8)
-        .map((binding) => `${binding.target} = ${binding.value}`);
+        .map((binding) =>
+          `${nestedWorkflow ? binding.target.replace(/^parameter\./, "") : binding.target} ← ${sequenceValue(binding.value)}`,
+        );
       if (bindings.length > visibleBindings.length) {
         visibleBindings.push(`+${bindings.length - visibleBindings.length} more bindings`);
       }
       const contentType = requestContentType(step);
-      lines.push(
-        `  Note over Client,${target}: ${safeMultilineLabel([
-          contentType ? `Sends · ${contentType}` : "Request bindings",
-          ...visibleBindings,
-        ])}`,
+      callDetails.push(
+        nestedWorkflow
+          ? "Passes workflow inputs"
+          : contentType
+            ? `Sends · ${contentType}`
+            : "Request bindings",
+        ...visibleBindings,
       );
     }
+    lines.push(`  Note right of Client: ${safeMultilineLabel(callDetails)}`);
 
     lines.push(`  Client->>+${target}: ${safeLabel(requestLabel)}`);
     const criteria = (step.successCriteria ?? [])
@@ -515,35 +515,38 @@ export function workflowToSequence(
     const response = resolved?.operation.responses?.find(
       (candidate) => candidate.status === status,
     );
-    const responseLabel = status
-      ? `${status}${response?.description ? ` · ${response.description}` : ""}`
-      : "Response";
+    const responseLabel = nestedWorkflow
+      ? `Returns · ${Object.keys(step.outputs ?? {}).join(", ") || "workflow outputs"}`
+      : status
+        ? `${status}${response?.description ? ` · ${response.description}` : ""}`
+        : "Response";
     lines.push(`  ${target}-->>-Client: ${safeLabel(responseLabel)}`);
     const responseDetails = [
       ...criteria.map((criterion) => `Expects · ${criterion}`),
       ...Object.entries(step.outputs ?? {}).map(
-        ([name, expression]) => `Captures · ${name} ← ${expression}`,
+        ([name, expression]) =>
+          `${nestedWorkflow ? "Maps output" : "Captures"} · ${name} ← ${sequenceValue(expression)}`,
       ),
     ];
     if (responseDetails.length) {
       lines.push(
-        `  Note over Client,${target}: ${safeMultilineLabel(responseDetails)}`,
+        `  Note right of Client: ${safeMultilineLabel(responseDetails)}`,
       );
     }
     const transitions = transitionLines(step);
     if (transitions.length) {
       lines.push(
-        `  Note over Client,${target}: ${safeMultilineLabel(transitions)}`,
+        `  Note right of Client: ${safeMultilineLabel(transitions)}`,
       );
     }
   }
 
   if (workflow.outputs && Object.keys(workflow.outputs).length) {
     lines.push(
-      `  Note over Initiator,Client: ${safeMultilineLabel([
+      `  Note right of Client: ${safeMultilineLabel([
         "Workflow outputs",
         ...Object.entries(workflow.outputs).map(
-          ([name, expression]) => `${name} ← ${expression}`,
+          ([name, expression]) => `${name} ← ${sequenceValue(expression)}`,
         ),
       ])}`,
     );
@@ -557,16 +560,53 @@ export function workflowToSequence(
   return lines.join("\n");
 }
 
+type SequenceParticipant = {
+  key: string;
+  label: string;
+};
+
 function participantForStep(
+  spec: ArazzoSpec,
   step: ArazzoStep,
   catalogues: ApiCatalogue[],
-): string {
-  return (
-    sourceForStep(step) ??
-    resolveStepOperation(step.operationId, step.operationPath, catalogues)?.catalogue
-      .sourceName ??
-    (step.workflowId ? "Workflow" : "API")
+): SequenceParticipant {
+  if (step.workflowId) {
+    const nested = spec.workflows.find(
+      (candidate) => candidate.workflowId === step.workflowId,
+    );
+    return {
+      key: `workflow_${step.workflowId}`,
+      label: `${nested?.summary ?? step.workflowId} [workflow]`,
+    };
+  }
+  const resolved = resolveStepOperation(
+    step.operationId,
+    step.operationPath,
+    catalogues,
   );
+  const declaredSource = sourceForStep(step);
+  const fallbackSources = spec.sourceDescriptions.filter(
+    (source) => source.type !== "arazzo",
+  );
+  const sourceName =
+    resolved?.catalogue.sourceName ??
+    declaredSource ??
+    (fallbackSources.length === 1 ? fallbackSources[0].name : undefined);
+  if (sourceName) {
+    const catalogue = catalogues.find(
+      (candidate) => candidate.sourceName === sourceName,
+    );
+    const source = spec.sourceDescriptions.find(
+      (candidate) => candidate.name === sourceName,
+    );
+    return {
+      key: sourceName,
+      label: catalogue
+        ? `${catalogue.title} [${sourceName}]`
+        : `${sourceName} [${source?.type === "asyncapi" ? "AsyncAPI" : "OpenAPI"}]`,
+    };
+  }
+  return { key: "API", label: "API" };
 }
 
 function workflowInputLines(workflow: ArazzoWorkflow): string[] {
@@ -579,6 +619,20 @@ function workflowInputLines(workflow: ArazzoWorkflow): string[] {
     const type = typeof property.type === "string" ? ` · ${property.type}` : "";
     return `${name}${type}${required.has(name) ? " · required" : " · optional"}`;
   });
+}
+
+function sequenceValue(value: string): string {
+  const input = value.match(/^\$inputs\.([A-Za-z0-9_.-]+)$/);
+  if (input) return `input · ${input[1]}`;
+  const stepOutput = value.match(
+    /^\$steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_.-]+)$/,
+  );
+  if (stepOutput) return `${stepOutput[1]} output · ${stepOutput[2]}`;
+  const nestedOutput = value.match(/^\$outputs\.([A-Za-z0-9_.-]+)$/);
+  if (nestedOutput) return `workflow output · ${nestedOutput[1]}`;
+  const responseBody = value.match(/^\$response\.body#(.*)$/);
+  if (responseBody) return `response body · ${responseBody[1] || "/"}`;
+  return value;
 }
 
 function statusCodeFromCriteria(criteria: string[]): string | undefined {

@@ -41,16 +41,37 @@ vi.mock("next/link", () => ({
 }));
 
 vi.mock("./FlowView", () => ({
-  FlowView: () => <div data-testid="flow-view">Flow projection</div>,
+  FlowView: ({
+    onStepSelect,
+  }: {
+    onStepSelect: (stepId: string) => void;
+  }) => (
+    <div data-testid="flow-view">
+      Flow projection
+      <button onClick={() => onStepSelect("find-worker")}>Select flow step</button>
+    </div>
+  ),
 }));
 vi.mock("./MermaidView", () => ({
-  MermaidView: () => <div>Sequence projection</div>,
+  MermaidView: ({
+    onStepSelect,
+    detailBubble,
+  }: {
+    onStepSelect: (stepId: string) => void;
+    detailBubble?: React.ReactNode;
+  }) => (
+    <div>
+      Sequence projection
+      <button onClick={() => onStepSelect("find-worker")}>Select sequence call</button>
+      {detailBubble}
+    </div>
+  ),
 }));
 vi.mock("./DocumentationView", () => ({
   DocumentationView: () => <div>Documentation projection</div>,
 }));
 vi.mock("./SelectionInspector", () => ({
-  SelectionInspector: () => null,
+  SelectionInspector: () => <aside>Selected step inspector</aside>,
 }));
 vi.mock("./AddWorkflowDialog", () => ({
   AddWorkflowDialog: () => null,
@@ -214,5 +235,28 @@ describe("Workspace recovery", () => {
       await screen.findByRole("heading", { name: "The YAML needs attention" }),
     ).toBeTruthy();
     expect(screen.getByText("legacy-draft.yml")).toBeTruthy();
+  });
+
+  it("scopes sequence selection to a dismissible diagram bubble", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    render(<Workspace />);
+
+    await screen.findByTestId("flow-view");
+    await user.click(screen.getByRole("button", { name: "Select flow step" }));
+    expect(screen.getByText("Selected step inspector")).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: "Sequence" }));
+    expect(screen.queryByText("Selected step inspector")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /Sequence details/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Select sequence call" }));
+    expect(
+      screen.getByRole("dialog", { name: "Sequence details for find-worker" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Selected step inspector")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Close sequence details" }));
+    expect(screen.queryByRole("dialog", { name: /Sequence details/ })).toBeNull();
   });
 });

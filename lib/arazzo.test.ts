@@ -79,10 +79,10 @@ describe("Arazzo document services", () => {
     expect(sequence).toContain("sequenceDiagram");
     expect(sequence).toContain("participant node_deel as Deel API [deel]");
     expect(sequence).toContain("GET /rest/people · List people");
-    expect(sequence).toContain("query.search = $inputs.worker_email");
+    expect(sequence).toContain("query.search ← input · worker_email");
     expect(sequence).toContain("node_deel-->>-Client: 200 · People returned");
     expect(sequence).toContain("Expects · $statusCode == 200");
-    expect(sequence).toContain("worker_id ← $response.body＃/data/0/id");
+    expect(sequence).toContain("worker_id ← response body · /data/0/id");
     expect(sequence).toContain("Workflow outputs");
   });
 

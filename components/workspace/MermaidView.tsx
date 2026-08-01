@@ -1,11 +1,28 @@
 "use client";
 
-import { Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
+import {
+  Hand,
+  Minus,
+  MousePointer2,
+  Plus,
+  RotateCcw,
+  StretchHorizontal,
+} from "lucide-react";
 import mermaid from "mermaid";
-import { useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
-const MIN_ZOOM = 0.35;
-const MAX_ZOOM = 2.5;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.15;
+
+type DiagramSize = { width: number; height: number };
 
 export function MermaidView({
   chart,
@@ -13,24 +30,32 @@ export function MermaidView({
   messageStepIds,
   selectedStepId = null,
   onStepSelect,
+  onStepClear,
+  detailBubble,
 }: {
   chart: string;
   interactiveStepIds?: string[];
   messageStepIds?: Array<string | null>;
   selectedStepId?: string | null;
   onStepSelect?: (stepId: string) => void;
+  onStepClear?: () => void;
+  detailBubble?: ReactNode;
 }) {
   const reactId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const panStart = useRef<{ x: number; y: number; left: number; top: number } | null>(
-    null,
-  );
+  const diagramSize = useRef<DiagramSize | null>(null);
+  const panStart = useRef<{
+    x: number;
+    y: number;
+    left: number;
+    top: number;
+  } | null>(null);
   const panMoved = useRef(false);
   const [svg, setSvg] = useState("");
   const [error, setError] = useState("");
   const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [panEnabled, setPanEnabled] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -46,7 +71,8 @@ export function MermaidView({
         lineColor: "#8d84dc",
         secondaryColor: "#e7e5ff",
         tertiaryColor: "#ffd447",
-        noteBkgColor: "#fff3b5",
+        noteBkgColor: "#f1f0ff",
+        noteBorderColor: "#cbc7ed",
         noteTextColor: "#20204b",
         actorBkg: "#ffffff",
         actorBorder: "#5b68f6",
@@ -59,6 +85,12 @@ export function MermaidView({
         curve: "basis",
         useMaxWidth: true,
       },
+      sequence: {
+        actorMargin: 54,
+        messageMargin: 28,
+        noteMargin: 8,
+        mirrorActors: false,
+      },
     });
 
     const render = async () => {
@@ -69,7 +101,7 @@ export function MermaidView({
           setSvg(result.svg);
           setError("");
           setZoom(1);
-          setOffset({ x: 0, y: 0 });
+          setPanEnabled(false);
         }
       } catch (caught) {
         if (active) {
@@ -86,66 +118,88 @@ export function MermaidView({
 
   useEffect(() => {
     const diagram = containerRef.current?.querySelector<SVGSVGElement>("svg");
-    if (diagram?.viewBox.baseVal.width && diagram.viewBox.baseVal.height) {
-      diagram.style.width = `${diagram.viewBox.baseVal.width}px`;
-      diagram.style.height = `${diagram.viewBox.baseVal.height}px`;
-      diagram.style.maxWidth = "none";
-      diagram.style.maxHeight = "none";
+    const viewport = viewportRef.current;
+    const width = diagram?.viewBox?.baseVal.width;
+    const height = diagram?.viewBox?.baseVal.height;
+    if (diagram && viewport && width && height) {
+      diagramSize.current = { width, height };
+      applyDiagramSize(diagram, { width, height }, 1);
+      window.requestAnimationFrame(() => scrollToTopCenter(viewport));
     }
+  }, [svg]);
 
-    const messageLabels =
-      containerRef.current?.querySelectorAll<SVGElement>(".messageText");
-    messageLabels?.forEach((label, index) => {
-      const stepId = messageStepIds
-        ? messageStepIds[index]
-        : interactiveStepIds[Math.floor(index / 2)];
-      if (!stepId) return;
-      label.dataset.stepId = stepId;
-      label.setAttribute("role", "button");
-      label.setAttribute("tabindex", "0");
-      label.setAttribute("aria-label", `Inspect workflow step ${stepId}`);
-      label.classList.toggle("is-selected-message", stepId === selectedStepId);
-    });
+  useEffect(() => {
+    const diagram = containerRef.current?.querySelector<SVGSVGElement>("svg");
+    if (diagram && diagramSize.current) {
+      applyDiagramSize(diagram, diagramSize.current, zoom);
+    }
+  }, [svg, zoom]);
+
+  useEffect(() => {
+    const labels = containerRef.current?.querySelectorAll<SVGElement>(
+      ".messageText",
+    );
+    const lines = containerRef.current?.querySelectorAll<SVGElement>(
+      ".messageLine0, .messageLine1",
+    );
+    decorateMessages(
+      labels,
+      interactiveStepIds,
+      messageStepIds,
+      selectedStepId,
+      true,
+    );
+    decorateMessages(
+      lines,
+      interactiveStepIds,
+      messageStepIds,
+      selectedStepId,
+      false,
+    );
   }, [interactiveStepIds, messageStepIds, selectedStepId, svg]);
+
+  const changeZoom = useCallback((nextZoom: number) => {
+    const viewport = viewportRef.current;
+    const clamped = clampZoom(nextZoom);
+    if (!viewport || clamped === zoom) return;
+    const scale = clamped / zoom;
+    const centerX = viewport.scrollLeft + viewport.clientWidth / 2;
+    const centerY = viewport.scrollTop + viewport.clientHeight / 2;
+    setZoom(clamped);
+    window.requestAnimationFrame(() => {
+      viewport.scrollLeft = centerX * scale - viewport.clientWidth / 2;
+      viewport.scrollTop = centerY * scale - viewport.clientHeight / 2;
+    });
+  }, [zoom]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const handleWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      if (event.ctrlKey || event.metaKey) {
-        setZoom((current) =>
-          Math.min(
-            MAX_ZOOM,
-            Math.max(MIN_ZOOM, current - event.deltaY * 0.002),
-          ),
-        );
-      } else {
-        setOffset((current) => ({
-          x: current.x - event.deltaX,
-          y: current.y - event.deltaY,
-        }));
-      }
+      changeZoom(zoom - event.deltaY * 0.002);
     };
     viewport.addEventListener("wheel", handleWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", handleWheel);
-  }, []);
+  }, [changeZoom, zoom]);
 
-  const changeZoom = (nextZoom: number) => {
-    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom)));
+  const fitWidth = () => {
+    const viewport = viewportRef.current;
+    const size = diagramSize.current;
+    if (!viewport || !size?.width) return;
+    const nextZoom = clampZoom((viewport.clientWidth - 72) / size.width);
+    setZoom(nextZoom);
+    window.requestAnimationFrame(() => scrollToTopCenter(viewport));
   };
 
-  const fitDiagram = () => {
+  const resetView = () => {
     const viewport = viewportRef.current;
-    const diagram = containerRef.current?.querySelector<SVGSVGElement>("svg");
-    if (!viewport || !diagram?.viewBox.baseVal.width) return;
-    const nextZoom = Math.min(
-      (viewport.clientWidth - 72) / diagram.viewBox.baseVal.width,
-      (viewport.clientHeight - 72) / diagram.viewBox.baseVal.height,
-      1,
-    );
-    changeZoom(nextZoom);
-    setOffset({ x: 0, y: 0 });
+    setZoom(1);
+    setPanEnabled(false);
+    if (viewport) {
+      window.requestAnimationFrame(() => scrollToTopCenter(viewport));
+    }
   };
 
   if (error) {
@@ -168,25 +222,44 @@ export function MermaidView({
           panMoved.current = false;
           return;
         }
-        const label = (event.target as Element).closest<SVGElement>(
-          "[data-step-id]",
-        );
-        if (label?.dataset.stepId) onStepSelect?.(label.dataset.stepId);
+        if (panEnabled) return;
+        const target = event.target as Element;
+        if (target.closest(".diagram-toolbar, .sequence-step-bubble")) return;
+        const selectable = target.closest<SVGElement>("[data-step-id]");
+        if (selectable?.dataset.stepId) {
+          onStepSelect?.(selectable.dataset.stepId);
+        } else {
+          onStepClear?.();
+        }
       }}
       onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          onStepClear?.();
+          return;
+        }
         if (event.key !== "Enter" && event.key !== " ") return;
-        const label = (event.target as Element).closest<SVGElement>(
+        const selectable = (event.target as Element).closest<SVGElement>(
           "[data-step-id]",
         );
-        if (!label?.dataset.stepId) return;
+        if (!selectable?.dataset.stepId) return;
         event.preventDefault();
-        onStepSelect?.(label.dataset.stepId);
+        onStepSelect?.(selectable.dataset.stepId);
       }}
     >
       <div className="diagram-toolbar" aria-label="Sequence diagram controls">
         <button
+          className={`icon-button ${panEnabled ? "is-active" : ""}`}
+          onClick={() => setPanEnabled((current) => !current)}
+          aria-label={panEnabled ? "Use selection mode" : "Enable pan mode"}
+          aria-pressed={panEnabled}
+          title={panEnabled ? "Selection mode" : "Pan mode"}
+        >
+          {panEnabled ? <MousePointer2 size={14} /> : <Hand size={14} />}
+        </button>
+        <span className="diagram-toolbar-divider" />
+        <button
           className="icon-button"
-          onClick={() => changeZoom(zoom - 0.15)}
+          onClick={() => changeZoom(zoom - ZOOM_STEP)}
           disabled={zoom <= MIN_ZOOM}
           aria-label="Zoom out"
           title="Zoom out"
@@ -196,7 +269,7 @@ export function MermaidView({
         <span>{Math.round(zoom * 100)}%</span>
         <button
           className="icon-button"
-          onClick={() => changeZoom(zoom + 0.15)}
+          onClick={() => changeZoom(zoom + ZOOM_STEP)}
           disabled={zoom >= MAX_ZOOM}
           aria-label="Zoom in"
           title="Zoom in"
@@ -205,56 +278,71 @@ export function MermaidView({
         </button>
         <button
           className="icon-button"
-          onClick={fitDiagram}
-          aria-label="Fit diagram"
-          title="Fit diagram"
+          onClick={fitWidth}
+          aria-label="Fit diagram width"
+          title="Fit width and return to top"
         >
-          <Maximize2 size={14} />
+          <StretchHorizontal size={14} />
         </button>
         <button
           className="icon-button"
-          onClick={() => {
-            setZoom(1);
-            setOffset({ x: 0, y: 0 });
-          }}
-          aria-label="Reset diagram view"
-          title="Reset to 100%"
+          onClick={resetView}
+          aria-label="Reset diagram to actual size"
+          title="Actual size and return to top"
         >
           <RotateCcw size={14} />
         </button>
       </div>
+
       {interactiveStepIds.length > 0 && (
         <span className="diagram-interaction-hint">
-          Select a call to inspect · drag to pan
+          {panEnabled
+            ? "Pan mode · drag the canvas"
+            : "Select a call for details · scroll to move"}
         </span>
       )}
+
+      {detailBubble && (
+        <div
+          className="sequence-step-bubble-layer"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {detailBubble}
+        </div>
+      )}
+
       <div
         ref={viewportRef}
-        className="mermaid-viewport"
+        className={`mermaid-viewport ${panEnabled ? "is-pan-enabled" : ""}`}
+        tabIndex={0}
         onPointerDown={(event) => {
-          if (event.button !== 0) return;
+          if (!panEnabled || event.button !== 0) return;
+          const viewport = event.currentTarget;
           panMoved.current = false;
           panStart.current = {
             x: event.clientX,
             y: event.clientY,
-            left: offset.x,
-            top: offset.y,
+            left: viewport.scrollLeft,
+            top: viewport.scrollTop,
           };
-          event.currentTarget.setPointerCapture(event.pointerId);
+          viewport.setPointerCapture?.(event.pointerId);
         }}
         onPointerMove={(event) => {
           const start = panStart.current;
           if (!start) return;
-          const x = start.left + event.clientX - start.x;
-          const y = start.top + event.clientY - start.y;
-          if (Math.abs(x - start.left) + Math.abs(y - start.top) > 4) {
+          const deltaX = event.clientX - start.x;
+          const deltaY = event.clientY - start.y;
+          if (Math.abs(deltaX) + Math.abs(deltaY) > 4) {
             panMoved.current = true;
           }
-          setOffset({ x, y });
+          event.currentTarget.scrollLeft = start.left - deltaX;
+          event.currentTarget.scrollTop = start.top - deltaY;
         }}
         onPointerUp={(event) => {
+          if (!panStart.current) return;
           panStart.current = null;
-          event.currentTarget.releasePointerCapture(event.pointerId);
+          event.currentTarget.releasePointerCapture?.(event.pointerId);
         }}
         onPointerCancel={() => {
           panStart.current = null;
@@ -263,12 +351,57 @@ export function MermaidView({
         <div
           ref={containerRef}
           className="mermaid-diagram-surface"
-          style={{
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
-          }}
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       </div>
     </div>
   );
+}
+
+function clampZoom(zoom: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+}
+
+function applyDiagramSize(
+  diagram: SVGSVGElement,
+  size: DiagramSize,
+  zoom: number,
+) {
+  diagram.style.width = `${size.width * zoom}px`;
+  diagram.style.height = `${size.height * zoom}px`;
+  diagram.style.maxWidth = "none";
+  diagram.style.maxHeight = "none";
+}
+
+function scrollToTopCenter(viewport: HTMLDivElement) {
+  viewport.scrollTop = 0;
+  viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+}
+
+function decorateMessages(
+  elements: NodeListOf<SVGElement> | undefined,
+  interactiveStepIds: string[],
+  messageStepIds: Array<string | null> | undefined,
+  selectedStepId: string | null,
+  keyboardAccessible: boolean,
+) {
+  elements?.forEach((element, index) => {
+    const stepId = messageStepIds
+      ? messageStepIds[index]
+      : interactiveStepIds[Math.floor(index / 2)];
+    if (!stepId) {
+      delete element.dataset.stepId;
+      element.removeAttribute("role");
+      element.removeAttribute("tabindex");
+      element.classList.remove("is-selected-message");
+      return;
+    }
+    element.dataset.stepId = stepId;
+    element.setAttribute("aria-label", `Inspect workflow step ${stepId}`);
+    if (keyboardAccessible) {
+      element.setAttribute("role", "button");
+      element.setAttribute("tabindex", "0");
+    }
+    element.classList.toggle("is-selected-message", stepId === selectedStepId);
+  });
 }

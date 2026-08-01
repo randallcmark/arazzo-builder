@@ -79,4 +79,67 @@ describe("Arazzo sequence projection", () => {
     expect(chart).not.toContain("&quot;");
     await expect(mermaid.parse(chart)).resolves.toBeTruthy();
   });
+
+  it("names nested workflows and unqualified OpenAPI targets", async () => {
+    const spec: ArazzoSpec = {
+      arazzo: "1.0.0",
+      info: { title: "OAuth", version: "1.0.0" },
+      sourceDescriptions: [
+        { name: "apim-auth", url: "./oauth.openapi.yaml", type: "openapi" },
+      ],
+      workflows: [
+        {
+          workflowId: "refresh-token-flow",
+          summary: "Refresh an access token",
+          steps: [
+            {
+              stepId: "do-the-auth-flow",
+              workflowId: "authorization-code-flow",
+              parameters: [
+                { name: "client_id", value: "$inputs.my_client_id" },
+              ],
+              outputs: { my_refresh_token: "$outputs.refresh_token" },
+            },
+            {
+              stepId: "do-the-refresh",
+              operationId: "get-token",
+              requestBody: {
+                contentType: "application/x-www-form-urlencoded",
+                payload: {
+                  grant_type: "refresh_token",
+                  refresh_token:
+                    "$steps.do-the-auth-flow.outputs.my_refresh_token",
+                },
+              },
+              successCriteria: [{ condition: "$statusCode == 200" }],
+            },
+          ],
+        },
+        {
+          workflowId: "authorization-code-flow",
+          summary: "Get an access token using an authorization code",
+          steps: [],
+        },
+      ],
+    };
+
+    const chart = workflowToSequence(spec, spec.workflows[0]);
+
+    expect(chart).toContain(
+      "participant node_workflow_authorization_code_flow as Get an access token using an authorization code [workflow]",
+    );
+    expect(chart).toContain(
+      "participant node_apim_auth as apim-auth [OpenAPI]",
+    );
+    expect(chart).not.toContain("participant node_Workflow as Workflow");
+    expect(chart).not.toContain("participant node_API as API");
+    expect(chart).toContain(
+      "Client->>+node_workflow_authorization_code_flow: Run workflow · Get an access token using an authorization code",
+    );
+    expect(chart).toContain("client_id ← input · my_client_id");
+    expect(chart).toContain(
+      "body.refresh_token ← do-the-auth-flow output · my_refresh_token",
+    );
+    await expect(mermaid.parse(chart)).resolves.toBeTruthy();
+  });
 });

@@ -60,6 +60,7 @@ import { DocumentationView } from "./DocumentationView";
 import { FlowView } from "./FlowView";
 import { MermaidView } from "./MermaidView";
 import { SelectionInspector } from "./SelectionInspector";
+import { SequenceStepBubble } from "./SequenceStepBubble";
 import { YamlWorkspacePanel } from "./YamlWorkspacePanel";
 import { useDocumentHistory } from "./useDocumentHistory";
 import { useWorkspaceDraft } from "./useWorkspaceDraft";
@@ -154,6 +155,10 @@ export function Workspace() {
   );
   const selectedEdge =
     graphEdges.find((edge) => edge.id === selectedEdgeId) ?? null;
+  const selectedSequenceStep =
+    view === "sequence"
+      ? workflow?.steps.find((step) => step.stepId === selectedStepId) ?? null
+      : null;
   const embeddedLayout = workflow ? embeddedWorkflowLayout(workflow) : null;
   useEffect(
     () => () => {
@@ -426,8 +431,11 @@ export function Workspace() {
   }, [source, selectedStepId, view, workflow]);
 
   const selectView = (nextView: ViewMode) => {
+    if (nextView === "sequence" || view === "sequence") {
+      setSelectedStepId(null);
+      setSelectedEdgeId(null);
+    }
     setView(nextView);
-    if (nextView === "sequence") setSelectedEdgeId(null);
   };
 
   const handleViewTabKeyDown = (
@@ -777,6 +785,17 @@ export function Workspace() {
                   setSelectedStepId(stepId);
                   setSelectedEdgeId(null);
                 }}
+                onStepClear={() => setSelectedStepId(null)}
+                detailBubble={
+                  selectedSequenceStep ? (
+                    <SequenceStepBubble
+                      workflow={workflow}
+                      step={selectedSequenceStep}
+                      catalogues={catalogues}
+                      onClose={() => setSelectedStepId(null)}
+                    />
+                  ) : null
+                }
               />
             ) : view === "docs" ? (
               <DocumentationView
@@ -789,7 +808,7 @@ export function Workspace() {
 
         {workflow &&
           (selectedStepId || selectedEdge) &&
-          ["flow", "flowchart", "sequence"].includes(view) && (
+          ["flow", "flowchart"].includes(view) && (
             <SelectionInspector
               workflow={workflow}
               selectedStepId={selectedStepId}
